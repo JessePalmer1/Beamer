@@ -100,6 +100,12 @@ export default function SavedLocationsScreen() {
       // Navigate to the maps tab
       router.push('/maps');
       
+      // Add a timeout fallback to clear loading state if something goes wrong
+      setTimeout(() => {
+        setIsAnalyzing(false);
+        console.log('Saved location analysis timeout - clearing analyzing state');
+      }, 30000); // 30 second fallback timeout
+      
       Alert.alert(
         'Route Visualization',
         `Loading "${location.name}" in the Maps tab. You can view the 3D route and terrain visualization.`,
@@ -107,6 +113,7 @@ export default function SavedLocationsScreen() {
       );
     } catch (error) {
       Alert.alert('Error', 'Failed to prepare route visualization');
+      setIsAnalyzing(false); // Clear analyzing state on error
     } finally {
       setAnalyzingIds(prev => {
         const newSet = new Set(prev);
