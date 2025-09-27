@@ -19,7 +19,7 @@ import { useRoute } from '@/contexts/RouteContext';
 
 export default function SavedLocationsScreen() {
   const { savedLocations, updateSavedLocation, deleteSavedLocation, refreshSavedLocations } = useSavedLocations();
-  const { setCurrentRoute, setIsAnalyzing } = useRoute();
+  const { setCurrentRoute, setIsAnalyzing, departureTime } = useRoute();
   const router = useRouter();
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingLocation, setEditingLocation] = useState<SavedLocation | null>(null);
@@ -90,7 +90,7 @@ export default function SavedLocationsScreen() {
           address: location.endAddress,
         },
         name: location.name,
-        departureTime: new Date().toISOString(),
+        departureTime: departureTime.toISOString(),
       };
 
       // Set the route in context and navigate to Maps tab

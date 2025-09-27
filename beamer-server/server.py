@@ -1,407 +1,516 @@
 from __future__ import annotations
 
-import html
 import math
 import os
-import re
+import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from functools import lru_cache
-from typing import Iterable, List, Sequence, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request, status
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
-from pysolar.solar import get_altitude, get_azimuth
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
+# Import glare calculation functions
+from glare_index import glare_score, _angdiff, _clip, _elev_term, _solar
+import glare_index
 
-GOOGLE_DIRECTIONS_URL = "https://maps.googleapis.com/maps/api/directions/json"
-EARTH_RADIUS_M = 6_371_000
+# Override glare parameters for more practical driving application
+# Original: THETA_H = 25.0 (too narrow for practical use)
+# New: THETA_H = 60.0 (wider azimuth range for more realistic glare detection)
+PRACTICAL_THETA_H = 60.0  # Degrees - azimuth range where glare can occur
+PRACTICAL_THETA_E = 20.0  # Degrees - elevation range (slightly increased)
+
+def practical_heading_term(delta):
+    """Modified heading term with wider azimuth range"""
+    if delta >= PRACTICAL_THETA_H: 
+        return 0.0
+    return _clip(1.0 - (delta / PRACTICAL_THETA_H) ** 2)
+
+def practical_elev_term(el):
+    """Modified elevation term with practical range"""
+    if el <= 0: 
+        return 0.0
+    primary = _clip(1.0 - el / PRACTICAL_THETA_E)
+    # Add tail for gradual falloff
+    tail = 0.0
+    if PRACTICAL_THETA_E < el < PRACTICAL_THETA_E + 10.0:
+        tail = (1.0 - (el - PRACTICAL_THETA_E) / 10.0) * 0.35
+    return _clip(primary + tail)
+
+def practical_glare_score(lat, lon, when, heading_deg):
+    """Glare score calculation with practical parameters for driving"""
+    az, el = _solar(lat, lon, when)
+    elev = practical_elev_term(el)
+    delta = _angdiff(az, heading_deg)
+    head = practical_heading_term(delta)
+    score = _clip(elev * head)
+    
+    return {
+        "score": score,
+        "azimuth_deg": az,
+        "elevation_deg": el,
+        "delta_heading_deg": delta,
+        "elevation_term": elev,
+        "heading_term": head
+    }
 
 
 class Settings(BaseModel):
+    google_places_api_key: str
     google_maps_api_key: str
-    elevation_api_url: str = Field(default="https://api.opentopodata.org/v1/srtm90m")
-    elevation_batch_size: int = Field(default=100, ge=1, le=512)
-
-
-@lru_cache(maxsize=1)
-def get_settings() -> Settings:
-    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-    if not api_key:
-        raise RuntimeError("GOOGLE_MAPS_API_KEY environment variable is required")
-    url = os.getenv("ELEVATION_API_URL", Settings.model_fields['elevation_api_url'].default)
-    batch_size = int(os.getenv("ELEVATION_BATCH_SIZE", Settings.model_fields['elevation_batch_size'].default))
-    return Settings(google_maps_api_key=api_key, elevation_api_url=url, elevation_batch_size=batch_size)
-
-
-class Location(BaseModel):
-    latitude: float = Field(..., ge=-90.0, le=90.0)
-    longitude: float = Field(..., ge=-180.0, le=180.0)
-
-
-class SunglareRequest(BaseModel):
-    departure_time: datetime
-    start: Location
-    end: Location
-
-    @field_validator("departure_time")
+    
     @classmethod
-    def ensure_timezone(cls, value: datetime, info: ValidationInfo) -> datetime:
-        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
-            raise ValueError("departure_time must include timezone information")
-        return value
-
-
-class RouteStepSummary(BaseModel):
-    instruction: str
-    distance_meters: int
-    duration_seconds: int
-
-
-class SegmentLocation(BaseModel):
-    latitude: float
-    longitude: float
-
-
-class SunglareSegment(BaseModel):
-    index: int
-    location: SegmentLocation
-    heading_degrees: float
-    sun_altitude_degrees: float
-    sun_azimuth_degrees: float
-    horizon_altitude_degrees: float
-    alignment_ratio: float
-    sunglare_index: float
-    sun_blocked: bool
-
-
-class SunglareResponse(BaseModel):
-    total_distance_meters: int
-    total_duration_seconds: int
-    directions: List[RouteStepSummary]
-    segments: List[SunglareSegment]
-
-
-class ExternalServiceError(Exception):
-    pass
-
-
-@dataclass
-class RouteStep:
-    instruction: str
-    distance_meters: int
-    duration_seconds: int
-    points: List[Tuple[float, float]]
-
-    @property
-    def representative_point(self) -> Tuple[float, float]:
-        midway = len(self.points) // 2
-        return self.points[midway]
-
-    @property
-    def heading(self) -> float:
-        if len(self.points) < 2:
-            return 0.0
-        return bearing_between(self.points[0], self.points[-1])
-
-
-@dataclass
-class RouteDetails:
-    distance_meters: int
-    duration_seconds: int
-    steps: List[RouteStep]
-
-
-class DirectionsClient:
-    def __init__(self, api_key: str, http_client: httpx.AsyncClient) -> None:
-        self._api_key = api_key
-        self._http = http_client
-
-    async def fetch(self, start: Location, end: Location, departure_time: datetime) -> RouteDetails:
-        params = {
-            "origin": f"{start.latitude},{start.longitude}",
-            "destination": f"{end.latitude},{end.longitude}",
-            "mode": "driving",
-            "departure_time": int(departure_time.timestamp()),
-            "key": self._api_key,
-        }
-        response = await self._http.get(GOOGLE_DIRECTIONS_URL, params=params)
-        if response.status_code != 200:
-            raise ExternalServiceError("Google Directions request failed")
-        payload = response.json()
-        status_code = payload.get("status")
-        if status_code != "OK":
-            message = payload.get("error_message") or status_code or "Directions unavailable"
-            raise ExternalServiceError(message)
-        routes = payload.get("routes", [])
-        if not routes:
-            raise ExternalServiceError("No routes returned from Google Directions")
-        first_route = routes[0]
-        legs = first_route.get("legs", [])
-        if not legs:
-            raise ExternalServiceError("Directions response missing legs data")
-        leg = legs[0]
-        steps_payload = leg.get("steps", [])
-        steps: List[RouteStep] = []
-        for raw_step in steps_payload:
-            polyline = raw_step.get("polyline", {}).get("points")
-            if not polyline:
-                continue
-            points = decode_polyline(polyline)
-            if not points:
-                continue
-            instruction = strip_html(raw_step.get("html_instructions", ""))
-            distance_m = int(raw_step.get("distance", {}).get("value", 0))
-            duration_s = int(raw_step.get("duration", {}).get("value", 0))
-            steps.append(RouteStep(
-                instruction=instruction,
-                distance_meters=distance_m,
-                duration_seconds=duration_s,
-                points=points,
-            ))
-        if not steps:
-            raise ExternalServiceError("No usable steps returned from Google Directions")
-        return RouteDetails(
-            distance_meters=int(leg.get("distance", {}).get("value", 0)),
-            duration_seconds=int(leg.get("duration", {}).get("value", 0)),
-            steps=steps,
+    def from_env(cls) -> "Settings":
+        places_key = os.getenv("GOOGLE_PLACES_API_KEY")
+        maps_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        
+        if not places_key:
+            raise RuntimeError("GOOGLE_PLACES_API_KEY environment variable is required")
+        if not maps_key:
+            raise RuntimeError("GOOGLE_MAPS_API_KEY environment variable is required")
+            
+        return cls(
+            google_places_api_key=places_key,
+            google_maps_api_key=maps_key
         )
 
 
-class ElevationClient:
-    def __init__(self, base_url: str, http_client: httpx.AsyncClient, batch_size: int = 100) -> None:
-        self._base_url = base_url.rstrip("/")
-        self._http = http_client
-        self._batch_size = batch_size
-
-    async def get_elevations(self, points: Sequence[Tuple[float, float]]) -> List[float]:
-        elevations: List[float] = []
-        for chunk in chunked(points, self._batch_size):
-            chunk_locations = "|".join(f"{lat:.6f},{lon:.6f}" for lat, lon in chunk)
-            response = await self._http.get(self._base_url, params={"locations": chunk_locations})
-            if response.status_code != 200:
-                raise ExternalServiceError("Elevation request failed")
-            payload = response.json()
-            results = payload.get("results")
-            if not results:
-                raise ExternalServiceError("Elevation response missing results")
-            for item in results:
-                elevation = item.get("elevation")
-                if elevation is None:
-                    raise ExternalServiceError("Elevation response missing value")
-                elevations.append(float(elevation))
-        if len(elevations) != len(points):
-            raise ExternalServiceError("Elevation response count mismatch")
-        return elevations
+# Request/Response models
+class PlacesAutocompleteRequest(BaseModel):
+    input: str = Field(..., min_length=1, max_length=200)
+    types: Optional[str] = "geocode"
 
 
-class SunglareService:
-    def __init__(self, horizon_sample_distances: Sequence[int] | None = None) -> None:
-        self._horizon_sample_distances = list(horizon_sample_distances or (1_000, 3_000, 5_000, 10_000))
-
-    async def compute(
-        self,
-        request: SunglareRequest,
-        directions_client: DirectionsClient,
-        elevation_client: ElevationClient,
-    ) -> SunglareResponse:
-        departure_utc = request.departure_time.astimezone(timezone.utc)
-        route = await directions_client.fetch(request.start, request.end, departure_utc)
-        sample_points = [step.representative_point for step in route.steps]
-        base_elevations = await elevation_client.get_elevations(sample_points)
-        segments: List[SunglareSegment] = []
-        for index, (step, base_elevation) in enumerate(zip(route.steps, base_elevations)):
-            lat, lon = step.representative_point
-            sun_altitude = float(get_altitude(lat, lon, departure_utc))
-            sun_azimuth = float(get_azimuth(lat, lon, departure_utc))
-            horizon_altitude = await self._compute_horizon_altitude(
-                origin=(lat, lon),
-                sun_azimuth=sun_azimuth,
-                base_elevation=base_elevation,
-                elevation_client=elevation_client,
-            )
-            alignment_ratio = compute_alignment_ratio(step.heading, sun_azimuth)
-            sunglare_index = compute_sunglare_index(alignment_ratio, sun_altitude, horizon_altitude)
-            segments.append(SunglareSegment(
-                index=index,
-                location=SegmentLocation(latitude=lat, longitude=lon),
-                heading_degrees=round(step.heading, 2),
-                sun_altitude_degrees=round(sun_altitude, 2),
-                sun_azimuth_degrees=round(sun_azimuth, 2),
-                horizon_altitude_degrees=round(horizon_altitude, 2),
-                alignment_ratio=round(alignment_ratio, 3),
-                sunglare_index=round(sunglare_index, 3),
-                sun_blocked=sun_altitude <= horizon_altitude,
-            ))
-        directions = [
-            RouteStepSummary(
-                instruction=step.instruction,
-                distance_meters=step.distance_meters,
-                duration_seconds=step.duration_seconds,
-            )
-            for step in route.steps
-        ]
-        return SunglareResponse(
-            total_distance_meters=route.distance_meters,
-            total_duration_seconds=route.duration_seconds,
-            directions=directions,
-            segments=segments,
-        )
-
-    async def _compute_horizon_altitude(
-        self,
-        *,
-        origin: Tuple[float, float],
-        sun_azimuth: float,
-        base_elevation: float,
-        elevation_client: ElevationClient,
-    ) -> float:
-        sample_points = [destination_point(origin, sun_azimuth, distance) for distance in self._horizon_sample_distances]
-        elevations = await elevation_client.get_elevations(sample_points)
-        highest_angle = -90.0
-        for distance, elevation in zip(self._horizon_sample_distances, elevations):
-            vertical = elevation - base_elevation
-            angle = math.degrees(math.atan2(vertical, distance))
-            highest_angle = max(highest_angle, angle)
-        return highest_angle
+class PlaceDetailsRequest(BaseModel):
+    place_id: str = Field(..., min_length=1)
+    fields: Optional[str] = "geometry"
 
 
-def decode_polyline(polyline: str) -> List[Tuple[float, float]]:
-    coordinates: List[Tuple[float, float]] = []
-    index = 0
-    lat = 0
-    lon = 0
-    length = len(polyline)
-    while index < length:
-        lat_change, index = _decode_single(polyline, index)
-        lon_change, index = _decode_single(polyline, index)
-        lat += lat_change
-        lon += lon_change
-        coordinates.append((lat / 1e5, lon / 1e5))
-    return coordinates
+class DirectionsRequest(BaseModel):
+    origin_lat: float = Field(..., ge=-90, le=90)
+    origin_lng: float = Field(..., ge=-180, le=180)
+    destination_lat: float = Field(..., ge=-90, le=90)
+    destination_lng: float = Field(..., ge=-180, le=180)
+    travel_mode: Optional[str] = "DRIVING"
 
 
-def _decode_single(encoded: str, index: int) -> Tuple[int, int]:
-    result = 0
-    shift = 0
-    while True:
-        b = ord(encoded[index]) - 63
-        index += 1
-        result |= (b & 0x1F) << shift
-        shift += 5
-        if b < 0x20:
-            break
-    delta = ~(result >> 1) if result & 1 else (result >> 1)
-    return delta, index
+class RoutePoint(BaseModel):
+    lat: float = Field(..., ge=-90, le=90)
+    lng: float = Field(..., ge=-180, le=180)
 
 
-def strip_html(text: str) -> str:
-    cleaned = re.sub(r"<[^>]+>", "", html.unescape(text or ""))
-    return re.sub(r"\s+", " ", cleaned).strip()
+class RouteSegment(BaseModel):
+    points: List[RoutePoint]
+    distance: float = Field(..., ge=0)  # meters
+    duration: float = Field(..., ge=0)  # seconds
+    instruction: str
 
 
-def chunked(sequence: Sequence[Tuple[float, float]], size: int) -> Iterable[Sequence[Tuple[float, float]]]:
-    for index in range(0, len(sequence), size):
-        yield sequence[index:index + size]
+class GlareAnalysisRequest(BaseModel):
+    segments: List[RouteSegment]
+    departure_time: str  # ISO format datetime string
+    timezone: Optional[str] = "UTC"  # e.g., "America/New_York"
 
 
-def bearing_between(start: Tuple[float, float], end: Tuple[float, float]) -> float:
-    lat1 = math.radians(start[0])
-    lat2 = math.radians(end[0])
-    diff_long = math.radians(end[1] - start[1])
-    x = math.sin(diff_long) * math.cos(lat2)
-    y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(diff_long)
-    bearing = math.degrees(math.atan2(x, y))
-    return (bearing + 360) % 360
-
-
-def destination_point(origin: Tuple[float, float], bearing_deg: float, distance_m: float) -> Tuple[float, float]:
-    lat1 = math.radians(origin[0])
-    lon1 = math.radians(origin[1])
-    angular_distance = distance_m / EARTH_RADIUS_M
-    bearing = math.radians(bearing_deg)
-    lat2 = math.asin(
-        math.sin(lat1) * math.cos(angular_distance)
-        + math.cos(lat1) * math.sin(angular_distance) * math.cos(bearing)
-    )
-    lon2 = lon1 + math.atan2(
-        math.sin(bearing) * math.sin(angular_distance) * math.cos(lat1),
-        math.cos(angular_distance) - math.sin(lat1) * math.sin(lat2),
-    )
-    return math.degrees(lat2), (math.degrees(lon2) + 540) % 360 - 180
-
-
-def compute_alignment_ratio(heading: float, sun_azimuth: float) -> float:
-    diff = abs((heading - sun_azimuth + 180) % 360 - 180)
-    if diff >= 90:
-        return 0.0
-    return max(0.0, math.cos(math.radians(diff)))
-
-
-def compute_sunglare_index(alignment_ratio: float, sun_altitude: float, horizon_altitude: float) -> float:
-    if alignment_ratio == 0.0:
-        return 0.0
-    if sun_altitude <= horizon_altitude:
-        return 0.0
-    altitude_factor = min(1.0, max(0.0, (sun_altitude - horizon_altitude) / 15.0))
-    return alignment_ratio * altitude_factor
+class GlarePoint(BaseModel):
+    lat: float
+    lng: float
+    timestamp: str  # ISO format
+    glare_score: float  # 0.0 to 1.0
+    sun_azimuth: float  # degrees
+    sun_elevation: float  # degrees
+    heading: float  # degrees
+    color: str  # hex color for visualization
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
-    app.state.http_client = http_client
-    settings = None
+    # Initialize HTTP client
+    app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
+    
+    # Load settings
     try:
-        settings = get_settings()
-        app.state.directions_client = DirectionsClient(settings.google_maps_api_key, http_client)
-        app.state.elevation_client = ElevationClient(settings.elevation_api_url, http_client, settings.elevation_batch_size)
-    except RuntimeError:
-        app.state.directions_client = None
-        app.state.elevation_client = None
-    app.state.sunglare_service = SunglareService()
+        app.state.settings = Settings.from_env()
+        print("✅ Google API keys loaded successfully")
+    except RuntimeError as e:
+        print(f"❌ Error loading settings: {e}")
+        app.state.settings = None
+    
+    yield
+    
+    # Cleanup
+    await app.state.http_client.aclose()
+
+
+app = FastAPI(
+    title="Beamer API",
+    description="Secure proxy for Google Maps APIs",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Add CORS middleware for React Native
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, restrict this to your app's domains
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Simple rate limiting (in production, use Redis or similar)
+request_counts: Dict[str, Dict[str, int]] = {}
+RATE_LIMIT_REQUESTS = 60  # requests per minute
+RATE_LIMIT_WINDOW = 60  # seconds
+
+
+def check_rate_limit(client_ip: str) -> bool:
+    """Simple rate limiting check"""
+    current_time = int(time.time())
+    current_window = current_time // RATE_LIMIT_WINDOW
+    
+    if client_ip not in request_counts:
+        request_counts[client_ip] = {}
+    
+    # Clean old windows (keep only current and previous window)
+    for window in list(request_counts[client_ip].keys()):
+        if window < current_window - 1:
+            del request_counts[client_ip][window]
+    
+    # Count requests in current window
+    current_requests = request_counts[client_ip].get(current_window, 0)
+    
+    if current_requests >= RATE_LIMIT_REQUESTS:
+        return False
+    
+    # Increment counter
+    request_counts[client_ip][current_window] = current_requests + 1
+    return True
+
+
+# Utility functions for route analysis
+
+
+def calculate_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate bearing/heading from point 1 to point 2 in degrees"""
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    dlon_rad = math.radians(lon2 - lon1)
+    
+    y = math.sin(dlon_rad) * math.cos(lat2_rad)
+    x = math.cos(lat1_rad) * math.sin(lat2_rad) - math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(dlon_rad)
+    
+    bearing_rad = math.atan2(y, x)
+    bearing_deg = math.degrees(bearing_rad)
+    return (bearing_deg + 360) % 360  # Normalize to 0-360
+
+
+def score_to_color(score: float) -> str:
+    """Convert glare score (0-1) to hex color (green to red)"""
+    # Green (0) to Yellow (0.5) to Red (1)
+    if score <= 0.5:
+        # Green to Yellow
+        r = int(255 * (score * 2))  # 0 to 255
+        g = 255
+        b = 0
+    else:
+        # Yellow to Red
+        r = 255
+        g = int(255 * (2 - score * 2))  # 255 to 0
+        b = 0
+    
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+@app.get("/")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "ok", "message": "Beamer API is running"}
+
+
+@app.post("/api/places/autocomplete")
+async def places_autocomplete(request: PlacesAutocompleteRequest, req: Request):
+    """Proxy endpoint for Google Places Autocomplete API"""
+    if not req.app.state.settings:
+        raise HTTPException(status_code=500, detail="Google API keys not configured")
+    
+    # Rate limiting
+    client_ip = req.client.host
+    if not check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    
     try:
-        yield
-    finally:
-        await http_client.aclose()
+        url = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
+        params = {
+            "input": request.input,
+            "key": req.app.state.settings.google_places_api_key,
+            "types": request.types
+        }
+        
+        response = await req.app.state.http_client.get(url, params=params)
+        response.raise_for_status()
+        
+        return response.json()
+        
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch places: {str(e)}")
 
 
-app = FastAPI(lifespan=lifespan)
-
-
-def get_directions_client(request: Request) -> DirectionsClient:
-    client: DirectionsClient | None = getattr(request.app.state, "directions_client", None)
-    if client is None:
-        settings = get_settings()
-        client = DirectionsClient(settings.google_maps_api_key, request.app.state.http_client)
-        request.app.state.directions_client = client
-    return client
-
-
-def get_elevation_client(request: Request) -> ElevationClient:
-    client: ElevationClient | None = getattr(request.app.state, "elevation_client", None)
-    if client is None:
-        settings = get_settings()
-        client = ElevationClient(settings.elevation_api_url, request.app.state.http_client, settings.elevation_batch_size)
-        request.app.state.elevation_client = client
-    return client
-
-
-def get_sunglare_service(request: Request) -> SunglareService:
-    return request.app.state.sunglare_service
-
-
-@app.post("/sunglare", response_model=SunglareResponse)
-async def sunglare_endpoint(
-    payload: SunglareRequest,
-    directions_client: DirectionsClient = Depends(get_directions_client),
-    elevation_client: ElevationClient = Depends(get_elevation_client),
-    sunglare_service: SunglareService = Depends(get_sunglare_service),
-):
+@app.post("/api/places/details")
+async def place_details(request: PlaceDetailsRequest, req: Request):
+    """Proxy endpoint for Google Place Details API"""
+    if not req.app.state.settings:
+        raise HTTPException(status_code=500, detail="Google API keys not configured")
+    
+    # Rate limiting
+    client_ip = req.client.host
+    if not check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    
     try:
-        return await sunglare_service.compute(payload, directions_client, elevation_client)
-    except ExternalServiceError as error:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+        url = "https://maps.googleapis.com/maps/api/place/details/json"
+        params = {
+            "place_id": request.place_id,
+            "fields": request.fields,
+            "key": req.app.state.settings.google_places_api_key
+        }
+        
+        response = await req.app.state.http_client.get(url, params=params)
+        response.raise_for_status()
+        
+        return response.json()
+        
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch place details: {str(e)}")
 
+
+@app.post("/api/directions")
+async def directions(request: DirectionsRequest, req: Request):
+    """Proxy endpoint for Google Directions API"""
+    if not req.app.state.settings:
+        raise HTTPException(status_code=500, detail="Google API keys not configured")
+    
+    # Rate limiting
+    client_ip = req.client.host
+    if not check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    
+    try:
+        url = "https://maps.googleapis.com/maps/api/directions/json"
+        params = {
+            "origin": f"{request.origin_lat},{request.origin_lng}",
+            "destination": f"{request.destination_lat},{request.destination_lng}",
+            "mode": request.travel_mode.lower(),
+            "key": req.app.state.settings.google_maps_api_key
+        }
+        
+        response = await req.app.state.http_client.get(url, params=params)
+        response.raise_for_status()
+        
+        return response.json()
+        
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch directions: {str(e)}")
+
+
+@app.get("/api/maps-key")
+async def get_maps_key(req: Request):
+    """Endpoint to get Google Maps JavaScript API key for WebView
+    
+    Note: This still exposes the key to the client, but at least it's behind our server.
+    For maximum security, consider implementing a token-based system instead.
+    """
+    if not req.app.state.settings:
+        raise HTTPException(status_code=500, detail="Google API keys not configured")
+    
+    # Rate limiting
+    client_ip = req.client.host
+    if not check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    
+    return {"key": req.app.state.settings.google_maps_api_key}
+
+
+@app.post("/api/analyze-glare")
+async def analyze_route_glare(request: GlareAnalysisRequest, req: Request):
+    """Analyze glare index along a route with time progression"""
+    # Rate limiting
+    client_ip = req.client.host
+    if not check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    
+    try:
+        # Parse departure time
+        try:
+            if request.timezone != "UTC":
+                # Parse with timezone
+                tz = ZoneInfo(request.timezone)
+                departure_dt = datetime.fromisoformat(request.departure_time.replace('Z', '')).replace(tzinfo=tz)
+            else:
+                departure_dt = datetime.fromisoformat(request.departure_time.replace('Z', '')).replace(tzinfo=timezone.utc)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid departure_time format: {str(e)}")
+        
+        # Calculate total route duration
+        total_duration = sum(segment.duration for segment in request.segments)
+        
+        glare_points: List[GlarePoint] = []
+        current_time = departure_dt
+        
+        for segment in request.segments:
+            points = segment.points
+            segment_duration = segment.duration
+            segment_distance = segment.distance
+            
+            if len(points) < 1:
+                continue  # Skip segments with no points
+            
+            # Create a linspace of points along this segment for better granularity
+            # Use more points for longer segments to get smooth gradient
+            # 1 point every ~50 meters, minimum 10 points, maximum 100 points per segment
+            num_analysis_points = max(10, min(100, int(segment_distance / 50)))
+            
+            # Create interpolated points along the segment
+            for i in range(num_analysis_points):
+                ratio = i / (num_analysis_points - 1) if num_analysis_points > 1 else 0
+                
+                # Interpolate along the segment polyline
+                if len(points) == 1:
+                    # Single point segment
+                    interpolated_point = points[0]
+                    heading = 0.0
+                else:
+                    # Find which polyline segment this ratio falls into
+                    total_polyline_points = len(points)
+                    polyline_index = min(int(ratio * (total_polyline_points - 1)), total_polyline_points - 2)
+                    local_ratio = (ratio * (total_polyline_points - 1)) - polyline_index
+                    
+                    # Interpolate between two consecutive polyline points
+                    p1 = points[polyline_index]
+                    p2 = points[polyline_index + 1] if polyline_index + 1 < len(points) else points[polyline_index]
+                    
+                    # Linear interpolation
+                    lat = p1.lat + (p2.lat - p1.lat) * local_ratio
+                    lng = p1.lng + (p2.lng - p1.lng) * local_ratio
+                    
+                    # Calculate heading direction from p1 to p2
+                    if polyline_index + 1 < len(points):
+                        heading = calculate_heading(p1.lat, p1.lng, p2.lat, p2.lng)
+                    else:
+                        # Last point, use previous heading if available
+                        if polyline_index > 0:
+                            prev_p = points[polyline_index - 1]
+                            heading = calculate_heading(prev_p.lat, prev_p.lng, p1.lat, p1.lng)
+                        else:
+                            heading = 0.0
+                    
+                    # Create interpolated point
+                    interpolated_point = RoutePoint(lat=lat, lng=lng)
+                
+                # Calculate time for this point
+                point_time = current_time + timedelta(seconds=ratio * segment_duration)
+                
+                # Calculate glare score using practical parameters
+                glare_result = practical_glare_score(interpolated_point.lat, interpolated_point.lng, point_time, heading)
+                
+                # Debug: Log first few points for troubleshooting
+                if len(glare_points) < 5:
+                    print(f"Debug glare point {len(glare_points)}:")
+                    print(f"  Location: {interpolated_point.lat:.6f}, {interpolated_point.lng:.6f}")
+                    print(f"  Time: {point_time}")
+                    print(f"  Heading: {heading:.1f}°")
+                    print(f"  Sun azimuth: {glare_result['azimuth_deg']:.1f}°")
+                    print(f"  Sun elevation: {glare_result['elevation_deg']:.1f}°")
+                    print(f"  Glare score: {glare_result['score']:.3f}")
+                    print(f"  Color: {score_to_color(glare_result['score'])}")
+                
+                # Create glare point with color mapping
+                glare_point = GlarePoint(
+                    lat=interpolated_point.lat,
+                    lng=interpolated_point.lng,
+                    timestamp=point_time.isoformat(),
+                    glare_score=glare_result["score"],
+                    sun_azimuth=glare_result["azimuth_deg"],
+                    sun_elevation=glare_result["elevation_deg"],
+                    heading=heading,
+                    color=score_to_color(glare_result["score"])
+                )
+                glare_points.append(glare_point)
+            
+            # Advance current time by segment duration
+            current_time += timedelta(seconds=segment_duration)
+        
+        # Calculate statistics
+        scores = [p.glare_score for p in glare_points]
+        stats = {
+            "total_points": len(glare_points),
+            "max_glare": max(scores) if scores else 0.0,
+            "min_glare": min(scores) if scores else 0.0,
+            "avg_glare": sum(scores) / len(scores) if scores else 0.0,
+            "high_glare_points": len([s for s in scores if s > 0.7]),  # Score > 0.7 is high risk
+            "total_duration_minutes": total_duration / 60,
+            "departure_time": departure_dt.isoformat(),
+            "arrival_time": (departure_dt + timedelta(seconds=total_duration)).isoformat()
+        }
+        
+        # Debug: Log statistics
+        print(f"Glare analysis complete:")
+        print(f"  Total points: {stats['total_points']}")
+        print(f"  Score range: {stats['min_glare']:.3f} - {stats['max_glare']:.3f}")
+        print(f"  Average score: {stats['avg_glare']:.3f}")
+        print(f"  High glare points: {stats['high_glare_points']}")
+        
+        # Test color mapping with various scores
+        print(f"Color mapping test:")
+        for test_score in [0.0, 0.2, 0.5, 0.8, 1.0]:
+            print(f"  Score {test_score}: {score_to_color(test_score)}")
+        
+        return {
+            "glare_points": glare_points,
+            "statistics": stats
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to analyze glare: {str(e)}")
+
+
+@app.get("/api/test-glare")
+async def test_glare():
+    """Test endpoint to verify glare calculations with known high-glare scenario"""
+    # Test scenario: Driving west in San Francisco at sunset
+    test_lat = 37.7749  # San Francisco
+    test_lng = -122.4194
+    test_heading = 270.0  # Due west
+    
+    # Sunset time (approximate)
+    sunset_time = datetime(2024, 6, 21, 19, 30, tzinfo=timezone.utc)  # Summer solstice sunset
+    
+    # Test glare calculation with both original and practical parameters
+    original_result = glare_score(test_lat, test_lng, sunset_time, test_heading)
+    practical_result = practical_glare_score(test_lat, test_lng, sunset_time, test_heading)
+    
+    return {
+        "test_scenario": "Driving west in SF at sunset",
+        "location": f"{test_lat}, {test_lng}",
+        "heading": f"{test_heading}° (west)",
+        "time": sunset_time.isoformat(),
+        "original_glare": {
+            "result": original_result,
+            "color": score_to_color(original_result["score"]),
+            "note": f"Original THETA_H=25° (narrow range)"
+        },
+        "practical_glare": {
+            "result": practical_result,
+            "color": score_to_color(practical_result["score"]),
+            "note": f"Practical THETA_H={PRACTICAL_THETA_H}° (wider range)"
+        },
+        "expected": "Practical should show higher glare (red/orange color)"
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -72,7 +72,8 @@ export default function MapsScreen() {
     setIsAnalyzing(true);
     sendMessageToWebView({
       type: 'loadRoute',
-      route: route
+      route: route,
+      departureTime: currentRoute?.departureTime // Pass departure time to WebView
     });
   };
 
@@ -334,6 +335,9 @@ export default function MapsScreen() {
                         // Process route data for development and sun glare analysis
                         try {
                             processRouteData(result);
+                            
+                            // After processing route data, analyze glare if route segments exist
+                            analyzeRouteGlare(result);
                         } catch (profileError) {
                             console.warn('Route profile processing failed, but route still loaded:', profileError);
                             // Send partial route profile with just basic info
@@ -349,8 +353,7 @@ export default function MapsScreen() {
                             }));
                         }
                         
-                        // Add demo 3D red line for sun glare visualization
-                        addDemo3DSunglareVisualization(route);
+                        // Demo visualization removed - only using real glare index gradient
                         
                         // Send route loaded message to React Native
                         window.ReactNativeWebView?.postMessage(JSON.stringify({
@@ -367,10 +370,9 @@ export default function MapsScreen() {
                 });
             }
 
-            // Store sunglare visualization elements for cleanup
-            let sunglarePolylines = [];
-            let sunglareMarkers = [];
+            // Store glare gradient visualization elements for cleanup
             let sunglareVisible = true;
+            let glareGradientPolylines = [];  // Store gradient polylines
 
             function clearRoute() {
                 if (directionsRenderer) {
@@ -386,8 +388,8 @@ export default function MapsScreen() {
                     });
                 }
                 
-                // Clear sunglare visualization
-                clearSunglareVisualization();
+                // Clear glare gradient visualization
+                clearGlareGradient();
                 
                 currentRoute = null;
                 console.log('Route cleared');
@@ -399,62 +401,40 @@ export default function MapsScreen() {
                 }));
             }
 
-            function clearSunglareVisualization() {
-                // Remove all sunglare polylines
-                sunglarePolylines.forEach(polyline => {
+            // Demo sunglare visualization cleanup removed - using real glare gradient only
+
+            function clearGlareGradient() {
+                // Remove all gradient polylines
+                glareGradientPolylines.forEach(polyline => {
                     if (polyline) {
                         polyline.setMap(null);
                     }
                 });
-                sunglarePolylines = [];
-
-                // Remove all sunglare markers
-                sunglareMarkers.forEach(marker => {
-                    if (marker) {
-                        marker.setMap(null);
-                    }
-                });
-                sunglareMarkers = [];
-
-                console.log('Sunglare visualization cleared');
+                glareGradientPolylines = [];
+                console.log('Glare gradient cleared');
             }
 
             function toggleSunglareVisualization() {
                 sunglareVisible = !sunglareVisible;
                 
                 if (sunglareVisible) {
-                    // Show sunglare visualization
-                    sunglarePolylines.forEach(polyline => {
-                        if (polyline) {
-                            polyline.setMap(map);
-                        }
-                    });
-                    sunglareMarkers.forEach(marker => {
-                        if (marker) {
-                            marker.setMap(map);
+                    // Show glare gradient visualization
+                    glareGradientPolylines.forEach(element => {
+                        if (element) {
+                            element.setMap(map);
                         }
                     });
                     
-                    // If no visualization exists and we have a route, create it
-                    if (sunglarePolylines.length === 0 && currentRoute) {
-                        addDemo3DSunglareVisualization(currentRoute);
-                    }
-                    
-                    console.log('Sunglare visualization shown');
+                    console.log('Glare gradient visualization shown');
                 } else {
-                    // Hide sunglare visualization
-                    sunglarePolylines.forEach(polyline => {
-                        if (polyline) {
-                            polyline.setMap(null);
-                        }
-                    });
-                    sunglareMarkers.forEach(marker => {
-                        if (marker) {
-                            marker.setMap(null);
+                    // Hide glare gradient visualization
+                    glareGradientPolylines.forEach(element => {
+                        if (element) {
+                            element.setMap(null);
                         }
                     });
                     
-                    console.log('Sunglare visualization hidden');
+                    console.log('Glare gradient visualization hidden');
                 }
             }
 
@@ -483,99 +463,7 @@ export default function MapsScreen() {
                 }
             }
 
-            function addDemo3DSunglareVisualization(route) {
-                if (!route || !route.start || !route.end) {
-                    console.error('Invalid route for sunglare visualization');
-                    return;
-                }
-
-                // Create demo coordinates for the 3D line
-                // This simulates sun glare intensity along the route
-                const demoSunglarePoints = [];
-                const startLat = route.start.latitude;
-                const startLng = route.start.longitude;
-                const endLat = route.end.latitude;
-                const endLng = route.end.longitude;
-
-                // Generate points along the route with varying elevations to simulate sun glare intensity
-                const numPoints = 20; // Number of points along the route
-                for (let i = 0; i <= numPoints; i++) {
-                    const ratio = i / numPoints;
-                    const lat = startLat + (endLat - startLat) * ratio;
-                    const lng = startLng + (endLng - startLng) * ratio;
-                    
-                    // Simulate varying sun glare intensity with elevation
-                    // Higher elevation = more intense sun glare
-                    const sunglareIntensity = Math.sin(ratio * Math.PI * 3) * 0.5 + 0.5; // 0 to 1
-                    const elevation = sunglareIntensity * 200; // 0 to 200 meters above ground
-                    
-                    demoSunglarePoints.push({
-                        lat: lat,
-                        lng: lng,
-                        elevation: elevation
-                    });
-                }
-
-                // Clear any existing sunglare visualization first
-                clearSunglareVisualization();
-
-                // Create the 3D polyline for sun glare visualization
-                const sunglarePolyline = new google.maps.Polyline({
-                    path: demoSunglarePoints.map(point => ({
-                        lat: point.lat,
-                        lng: point.lng
-                    })),
-                    geodesic: true,
-                    strokeColor: '#FF0000', // Red color for sun glare
-                    strokeOpacity: 0.8,
-                    strokeWeight: 6,
-                    map: map,
-                    zIndex: 1000 // Ensure it appears above other elements
-                });
-
-                // Add a semi-transparent tube effect for better 3D visualization
-                const sunglarePolylineShadow = new google.maps.Polyline({
-                    path: demoSunglarePoints.map(point => ({
-                        lat: point.lat + 0.0002, // Slight offset for shadow effect
-                        lng: point.lng + 0.0002
-                    })),
-                    geodesic: true,
-                    strokeColor: '#FF4444',
-                    strokeOpacity: 0.3,
-                    strokeWeight: 8,
-                    map: map,
-                    zIndex: 999
-                });
-
-                // Store polylines for cleanup
-                sunglarePolylines.push(sunglarePolyline);
-                sunglarePolylines.push(sunglarePolylineShadow);
-
-                // Add markers at high sun glare intensity points
-                demoSunglarePoints.forEach((point, index) => {
-                    if (point.elevation > 100) { // High intensity points
-                        const marker = new google.maps.Marker({
-                            position: { lat: point.lat, lng: point.lng },
-                            map: map,
-                            title: 'High Sun Glare Intensity: ' + Math.round(point.elevation) + 'm',
-                            icon: {
-                                url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
-                                    '<svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg">' +
-                                        '<circle cx="6" cy="6" r="5" fill="#FF0000" stroke="white" stroke-width="1"/>' +
-                                        '<circle cx="6" cy="6" r="2" fill="yellow"/>' +
-                                    '</svg>'
-                                ),
-                                scaledSize: new google.maps.Size(12, 12)
-                            }
-                        });
-                        
-                        // Store marker for cleanup
-                        sunglareMarkers.push(marker);
-                    }
-                });
-
-                // Demo 3D sun glare visualization added
-            }
+            // Demo sunglare visualization function removed - using real glare index gradient only
 
             // Polyline decoder function
             function decodePolyline(encoded) {
@@ -622,6 +510,152 @@ export default function MapsScreen() {
                 }
                 
                 return points;
+            }
+
+            // Analyze route for glare index with real-time solar calculations
+            async function analyzeRouteGlare(directionsResult) {
+                try {
+                    console.log('🌞 Starting glare analysis for route...');
+                    
+                    if (!directionsResult || !directionsResult.routes || directionsResult.routes.length === 0) {
+                        throw new Error('No routes found for glare analysis');
+                    }
+                    
+                    const route = directionsResult.routes[0];
+                    const leg = route.legs[0];
+                    
+                    // Convert Google route data to our API format
+                    const segments = leg.steps.map(step => {
+                        const polylinePoints = (step.polyline && step.polyline.points) 
+                            ? decodePolyline(step.polyline.points) 
+                            : [];
+                        
+                        return {
+                            points: polylinePoints.map(p => ({
+                                lat: p.lat,
+                                lng: p.lng
+                            })),
+                            distance: (step.distance && step.distance.value) || 0,
+                            duration: (step.duration && step.duration.value) || 0,
+                            instruction: step.html_instructions || step.instructions || 'Continue'
+                        };
+                    });
+                    
+                    // Use departure time from context (passed via route data)
+                    const departureTime = window.routeDepartureTime || new Date().toISOString();
+                    
+                    // Call our glare analysis API
+                    const response = await fetch('${config.apiUrl}/api/analyze-glare', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            segments: segments,
+                            departure_time: departureTime,
+                            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Glare analysis API request failed: ' + response.status);
+                    }
+                    
+                    const glareData = await response.json();
+                    console.log('🌞 Glare analysis completed:', glareData.statistics);
+                    console.log('🌞 Total glare points received:', glareData.glare_points.length);
+                    
+                    // Log sample of glare data for debugging
+                    if (glareData.glare_points.length > 0) {
+                        console.log('🌞 Sample glare points:', glareData.glare_points.slice(0, 5));
+                    }
+                    
+                    // Display gradient overlay on map
+                    displayGlareGradient(glareData.glare_points);
+                    
+                    // Send glare data to React Native
+                    window.ReactNativeWebView?.postMessage(JSON.stringify({
+                        type: 'glareAnalysis',
+                        data: glareData
+                    }));
+                    
+                } catch (error) {
+                    console.error('🌞 Glare analysis failed:', error);
+                    window.ReactNativeWebView?.postMessage(JSON.stringify({
+                        type: 'glareError',
+                        message: 'Glare analysis failed: ' + error.message
+                    }));
+                }
+            }
+
+            function displayGlareGradient(glarePoints) {
+                // Clear existing gradient
+                clearGlareGradient();
+                
+                if (!glarePoints || glarePoints.length === 0) {
+                    console.log('No glare points to display');
+                    return;
+                }
+                
+                console.log('🌈 Displaying glare gradient with', glarePoints.length, 'points');
+                
+                // Create individual small polylines for each consecutive pair of points
+                // This creates a smooth gradient effect
+                for (let i = 0; i < glarePoints.length - 1; i++) {
+                    const point1 = glarePoints[i];
+                    const point2 = glarePoints[i + 1];
+                    
+                    // Use the average color and score of the two points
+                    const avgScore = (point1.glare_score + point2.glare_score) / 2;
+                    
+                    // Create polyline for this small segment
+                    const polyline = new google.maps.Polyline({
+                        path: [
+                            { lat: point1.lat, lng: point1.lng },
+                            { lat: point2.lat, lng: point2.lng }
+                        ],
+                        geodesic: true,
+                        strokeColor: point1.color, // Use first point's color
+                        strokeOpacity: Math.max(0.6, avgScore), // More opaque for higher scores
+                        strokeWeight: Math.max(6, 12 * avgScore), // Thicker for higher scores
+                        map: map,
+                        zIndex: 2000 // Above other route elements
+                    });
+                    
+                    glareGradientPolylines.push(polyline);
+                }
+                
+                // Add markers for high glare areas (every 10th point to avoid clutter)
+                let markerCount = 0;
+                for (let i = 0; i < glarePoints.length; i += 10) {
+                    const point = glarePoints[i];
+                    if (point.glare_score > 0.7 && markerCount < 20) { // Limit to 20 markers max
+                        const marker = new google.maps.Marker({
+                            position: {
+                                lat: point.lat,
+                                lng: point.lng
+                            },
+                            map: map,
+                            title: 'High Glare Risk: ' + (point.glare_score * 100).toFixed(0) + '%\\nTime: ' + new Date(point.timestamp).toLocaleTimeString() + '\\nSun Elevation: ' + point.sun_elevation.toFixed(1) + '°\\nHeading: ' + point.heading.toFixed(1) + '°',
+                            icon: {
+                                url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
+                                    '<svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">' +
+                                        '<circle cx="10" cy="10" r="9" fill="' + point.color + '" stroke="white" stroke-width="2"/>' +
+                                        '<circle cx="10" cy="10" r="4" fill="yellow" opacity="0.9"/>' +
+                                        '<text x="10" y="13" text-anchor="middle" fill="black" font-size="10" font-weight="bold">☀</text>' +
+                                    '</svg>'
+                                ),
+                                scaledSize: new google.maps.Size(20, 20)
+                            }
+                        });
+                        
+                        glareGradientPolylines.push(marker); // Store for cleanup
+                        markerCount++;
+                    }
+                }
+                
+                console.log('🌈 Glare gradient displayed with', glareGradientPolylines.length, 'elements');
+                console.log('🌈 Glare score range:', Math.min(...glarePoints.map(p => p.glare_score)).toFixed(3), 'to', Math.max(...glarePoints.map(p => p.glare_score)).toFixed(3));
             }
 
             // Process route data for development/sun glare analysis
@@ -700,6 +734,10 @@ export default function MapsScreen() {
                     
                     switch(data.type) {
                         case 'loadRoute':
+                            // Store departure time for glare analysis
+                            if (data.departureTime) {
+                                window.routeDepartureTime = data.departureTime;
+                            }
                             loadRoute(data.route);
                             break;
                         case 'clearRoute':
@@ -727,8 +765,24 @@ export default function MapsScreen() {
         </script>
         
         <!-- Load Google Maps API -->
-        <script async defer 
-            src="https://maps.googleapis.com/maps/api/js?key=${config.googleMapsApiKey}&callback=initMap&libraries=geometry">
+        <script>
+            // Fetch Maps API key from our secure server
+            fetch('${config.apiUrl}/api/maps-key')
+                .then(response => response.json())
+                .then(data => {
+                    const script = document.createElement('script');
+                    script.src = 'https://maps.googleapis.com/maps/api/js?key=' + data.key + '&callback=initMap&libraries=geometry';
+                    script.async = true;
+                    script.defer = true;
+                    document.head.appendChild(script);
+                })
+                .catch(error => {
+                    console.error('Failed to load Maps API key:', error);
+                    window.ReactNativeWebView?.postMessage(JSON.stringify({
+                        type: 'error',
+                        message: 'Failed to load Maps API key: ' + error.message
+                    }));
+                });
         </script>
     </body>
     </html>
