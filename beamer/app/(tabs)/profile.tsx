@@ -82,71 +82,90 @@ export default function ProfileScreen() {
       };
 
       const jsonString = JSON.stringify(profileData, null, 2);
-      
+
       // For now, just show in alert (you could use Clipboard API in production)
       Alert.alert(
         'Profile Data',
         'Route profile data has been formatted. Check console for full JSON.',
         [{ text: 'OK' }]
       );
-      
+
       console.log('Route Profile JSON:', jsonString);
     } catch (error) {
       Alert.alert('Error', 'Failed to process profile data');
     }
   };
 
+  // Helper added above renderProfileSummary
+  const getWeightedAvgGlare = (segments: any[] = []) => {
+    const totalDuration = segments.reduce((sum, s) => sum + (s?.duration || 0), 0);
+    if (!totalDuration) return 0;
+    const weightedSum = segments.reduce(
+      (sum, s) => sum + ((s?.avgGlareScore || 0) * (s?.duration || 0)),
+      0
+    );
+    return weightedSum / totalDuration;
+  };
+
   const renderProfileSummary = () => {
     if (!currentRoute?.profile) return null;
 
     const profile = currentRoute.profile;
-    
+    const weightedAvg = getWeightedAvgGlare(profile.segments);
+
     return (
       <View style={styles.summaryCard}>
         <Text style={styles.summaryTitle}>Route Profile Summary</Text>
-        
+
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Total Distance:</Text>
           <Text style={styles.summaryValue}>
             {(profile.totalDistance / 1000).toFixed(2)} km
           </Text>
         </View>
-        
+
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Total Duration:</Text>
           <Text style={styles.summaryValue}>
             {Math.round(profile.totalDuration / 60)} min
           </Text>
         </View>
-        
+
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Road Segments:</Text>
           <Text style={styles.summaryValue}>{profile.segments.length}</Text>
         </View>
-        
+
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Total Points:</Text>
           <Text style={styles.summaryValue}>{profile.polylinePoints.length}</Text>
         </View>
-        
+
+        {/* New weighted glare row */}
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Avg Glare Score (weighted):</Text>
+          <Text
+            style={[
+              styles.summaryValue,
+              { color: getGlareColor(weightedAvg) }
+            ]}
+          >
+            {(weightedAvg * 100).toFixed(1)}%
+          </Text>
+        </View>
+
         {profile.glareAnalysis && (
-          <>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Avg Glare Score:</Text>
-              <Text style={[styles.summaryValue, { color: getGlareColor(profile.glareAnalysis.avgGlare) }]}>
-                {(profile.glareAnalysis.avgGlare * 100).toFixed(1)}%
-              </Text>
-            </View>
-            
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>High Glare Points:</Text>
-              <Text style={styles.summaryValue}>{profile.glareAnalysis.highGlarePoints}</Text>
-            </View>
-          </>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>High Glare Points:</Text>
+            <Text style={styles.summaryValue}>
+              {profile.glareAnalysis.highGlarePoints}
+            </Text>
+          </View>
         )}
       </View>
     );
   };
+
 
   const renderSegmentsList = () => {
     if (!currentRoute?.profile?.segments) return null;
@@ -162,9 +181,9 @@ export default function ProfileScreen() {
                 {(segment.distance / 1000).toFixed(2)} km
               </Text>
             </View>
-            
+
             <Text style={styles.segmentInstruction}>{segment.instruction}</Text>
-            
+
             <View style={styles.segmentDetails}>
               <Text style={styles.segmentDetail}>
                 Points: {segment.points.length}
@@ -180,7 +199,7 @@ export default function ProfileScreen() {
                 </Text>
               )}
             </View>
-            
+
             {segment.glareRiskLevel && (
               <View style={styles.glareRiskContainer}>
                 <Text style={styles.glareRiskLabel}>Sun Glare Risk:</Text>
@@ -189,14 +208,14 @@ export default function ProfileScreen() {
                 </Text>
               </View>
             )}
-            
+
             <View style={styles.segmentCoords}>
               <Text style={styles.coordLabel}>Start:</Text>
               <Text style={styles.coordValue}>
                 {segment.points[0]?.lat.toFixed(6)}, {segment.points[0]?.lng.toFixed(6)}
               </Text>
             </View>
-            
+
             <View style={styles.segmentCoords}>
               <Text style={styles.coordLabel}>End:</Text>
               <Text style={styles.coordValue}>
