@@ -58,10 +58,10 @@ export default function MapsScreen() {
         name: currentRoute.name,
       };
       
-      // Create a unique identifier for this route (excluding profile data)
-      const routeId = `${route.start.latitude},${route.start.longitude}-${route.end.latitude},${route.end.longitude}-${route.name}`;
-      
-      // Only load the route if it's actually different (not just profile update)
+      // Create a unique identifier for this route (including departure time to force reload when time changes)
+      const routeId = `${route.start.latitude},${route.start.longitude}-${route.end.latitude},${route.end.longitude}-${route.name}-${currentRoute.departureTime}`;
+
+      // Only load the route if it's actually different (including time changes)
       if (routeId !== lastLoadedRouteId) {
         setSelectedRoute(route);
         setLastLoadedRouteId(routeId);
@@ -75,7 +75,7 @@ export default function MapsScreen() {
       setSelectedRoute(null);
       setLastLoadedRouteId(null);
     }
-  }, [currentRoute?.start.latitude, currentRoute?.start.longitude, currentRoute?.end.latitude, currentRoute?.end.longitude, currentRoute?.name, isLoading, lastLoadedRouteId]);
+  }, [currentRoute?.start.latitude, currentRoute?.start.longitude, currentRoute?.end.latitude, currentRoute?.end.longitude, currentRoute?.name, currentRoute?.departureTime, isLoading, lastLoadedRouteId]);
 
   const sendMessageToWebView = (message: any) => {
     if (webViewRef.current) {
@@ -149,8 +149,14 @@ export default function MapsScreen() {
           setIsAnalyzing(false);
         }
                 } else if (data.type === 'routeProfile') {
-        // Route profile received - reduced logging to prevent spam
-        
+        // Route profile received
+        console.log('📊 Route profile received:', {
+          segments: data.profile.segments?.length || 0,
+          totalDistance: data.profile.totalDistance,
+          totalDuration: data.profile.totalDuration,
+          hasError: !!data.profile.error
+        });
+
         // Update the current route with profile data without triggering route reload
         if (currentRoute) {
           // Use a more targeted update that preserves the route ID to prevent reload
@@ -159,13 +165,29 @@ export default function MapsScreen() {
             profile: data.profile as RouteProfile
           };
           setCurrentRoute(updatedRoute);
+          console.log('📊 Route context updated with profile data');
+        } else {
+          console.warn('📊 Cannot update route profile - no current route');
         }
       } else if (data.type === 'glareAnalysis') {
         // Glare analysis data received - calculate per-segment averages
+        console.log('Glare analysis received:', data.data.statistics);
+        console.log('Glare points count:', data.data.glare_points.length);
+
         if (currentRoute?.profile && data.data) {
           const glarePoints = data.data.glare_points;
           const segments = currentRoute.profile.segments;
-          
+
+          // Log sample glare points for debugging
+          if (glarePoints.length > 0) {
+            console.log('Sample glare points:', glarePoints.slice(0, 3).map(p => ({
+              lat: p.lat,
+              lng: p.lng,
+              score: p.glare_score,
+              color: p.color
+            })));
+          }
+
           // Calculate average glare score for each segment
           const segmentsWithGlare = segments.map((segment, segmentIndex) => {
             // Find glare points that belong to this segment
@@ -173,13 +195,13 @@ export default function MapsScreen() {
             const segmentStartIndex = Math.floor((segmentIndex / segments.length) * glarePoints.length);
             const segmentEndIndex = Math.floor(((segmentIndex + 1) / segments.length) * glarePoints.length);
             const segmentGlarePoints = glarePoints.slice(segmentStartIndex, segmentEndIndex);
-            
+
             let avgGlareScore = 0;
             let glareRiskLevel: 'low' | 'medium' | 'high' = 'low';
-            
+
             if (segmentGlarePoints.length > 0) {
               avgGlareScore = segmentGlarePoints.reduce((sum: number, point: any) => sum + point.glare_score, 0) / segmentGlarePoints.length;
-              
+
               // Determine risk level
               if (avgGlareScore >= 0.7) {
                 glareRiskLevel = 'high';
@@ -189,14 +211,16 @@ export default function MapsScreen() {
                 glareRiskLevel = 'low';
               }
             }
-            
+
+            console.log(`🌞 Segment ${segmentIndex}: ${segmentGlarePoints.length} points, avg score: ${avgGlareScore.toFixed(3)}, risk: ${glareRiskLevel}`);
+
             return {
               ...segment,
               avgGlareScore,
               glareRiskLevel
             };
           });
-          
+
           // Update route with glare data
           const updatedRoute = {
             ...currentRoute,
@@ -206,7 +230,19 @@ export default function MapsScreen() {
               glareAnalysis: data.data.statistics
             }
           };
+
+          console.log('Updated route with glare analysis:', {
+            totalSegments: segmentsWithGlare.length,
+            avgGlareOverall: data.data.statistics.avg_glare,
+            highGlarePoints: data.data.statistics.high_glare_points,
+            hasProfile: !!updatedRoute.profile,
+            profileSegments: updatedRoute.profile?.segments?.length || 0
+          });
+
           setCurrentRoute(updatedRoute);
+          console.log('Route context updated with glare data - profile should now be complete');
+        } else {
+          console.warn('Cannot process glare analysis - missing route profile or data');
         }
       } else if (data.type === 'routeLoaded') {
         // Route loaded successfully - only log once
@@ -295,8 +331,8 @@ export default function MapsScreen() {
         
         <div class="controls">
             <button class="control-btn" onclick="toggle3D()">🌐 3D View</button>
-            <button class="control-btn" onclick="fitToRoute()">📍 Fit Route</button>
-            <button class="control-btn" onclick="toggleSunglareVisualization()">☀️ Sun Glare</button>
+            <button class="control-btn" onclick="fitToRoute()">Fit Route</button>
+            <button class="control-btn" onclick="toggleSunglareVisualization()">Sun Glare</button>
             <button class="control-btn clear-btn" onclick="clearRoute()">Clear</button>
         </div>
 
@@ -352,6 +388,12 @@ export default function MapsScreen() {
                     console.error('Invalid route data');
                     return;
                 }
+
+                console.log('Loading new route, clearing previous glare data');
+
+                // Clear previous glare visualization
+                clearGlareGradient();
+                clearSunDirectionArrows();
 
                 currentRoute = route;
                 
@@ -606,7 +648,7 @@ export default function MapsScreen() {
             // Analyze route for glare index with real-time solar calculations
             async function analyzeRouteGlare(directionsResult) {
                 try {
-                    console.log('🌞 Starting glare analysis for route...');
+                    console.log('Starting glare analysis for route...');
                     
                     if (!directionsResult || !directionsResult.routes || directionsResult.routes.length === 0) {
                         throw new Error('No routes found for glare analysis');
@@ -653,12 +695,12 @@ export default function MapsScreen() {
                     }
                     
                     const glareData = await response.json();
-                    console.log('🌞 Glare analysis completed:', glareData.statistics);
-                    console.log('🌞 Total glare points received:', glareData.glare_points.length);
+                    console.log('Glare analysis completed:', glareData.statistics);
+                    console.log('Total glare points received:', glareData.glare_points.length);
                     
                     // Log sample of glare data for debugging
                     if (glareData.glare_points.length > 0) {
-                        console.log('🌞 Sample glare points:', glareData.glare_points.slice(0, 5));
+                        console.log('Sample glare points:', glareData.glare_points.slice(0, 5));
                     }
                     
                     // Display gradient overlay on map
@@ -674,7 +716,7 @@ export default function MapsScreen() {
                     }));
                     
                 } catch (error) {
-                    console.error('🌞 Glare analysis failed:', error);
+                    console.error('Glare analysis failed:', error);
                     window.ReactNativeWebView?.postMessage(JSON.stringify({
                         type: 'glareError',
                         message: 'Glare analysis failed: ' + error.message
@@ -691,17 +733,27 @@ export default function MapsScreen() {
                     return;
                 }
                 
-                console.log('🌈 Displaying glare gradient with', glarePoints.length, 'points');
-                
+                console.log('Displaying glare gradient with', glarePoints.length, 'points');
+
+                // Log sample colors and scores for debugging
+                if (glarePoints.length > 0) {
+                    console.log('Sample glare colors:', glarePoints.slice(0, 5).map(p => ({
+                        score: p.glare_score.toFixed(3),
+                        color: p.color,
+                        lat: p.lat.toFixed(6),
+                        lng: p.lng.toFixed(6)
+                    })));
+                }
+
                 // Create individual small polylines for each consecutive pair of points
                 // This creates a smooth gradient effect
                 for (let i = 0; i < glarePoints.length - 1; i++) {
                     const point1 = glarePoints[i];
                     const point2 = glarePoints[i + 1];
-                    
+
                     // Use the average color and score of the two points
                     const avgScore = (point1.glare_score + point2.glare_score) / 2;
-                    
+
                     // Create polyline for this small segment
                     const polyline = new google.maps.Polyline({
                         path: [
@@ -710,13 +762,18 @@ export default function MapsScreen() {
                         ],
                         geodesic: true,
                         strokeColor: point1.color, // Use first point's color
-                        strokeOpacity: Math.max(0.6, avgScore), // More opaque for higher scores
-                        strokeWeight: Math.max(6, 12 * avgScore), // Thicker for higher scores
+                        strokeOpacity: Math.max(0.8, avgScore + 0.2), // More visible opacity
+                        strokeWeight: Math.max(8, 16 * avgScore), // Thicker lines for better visibility
                         map: map,
                         zIndex: 2000 // Above other route elements
                     });
-                    
+
                     glareGradientPolylines.push(polyline);
+
+                    // Log first few polylines for debugging
+                    if (i < 3) {
+                        console.log('Polyline ' + i + ': color=' + point1.color + ', opacity=' + Math.max(0.8, avgScore + 0.2) + ', weight=' + Math.max(8, 16 * avgScore));
+                    }
                 }
                 
                 // Add markers for high glare areas (every 10th point to avoid clutter)
@@ -748,8 +805,8 @@ export default function MapsScreen() {
                     }
                 }
                 
-                console.log('🌈 Glare gradient displayed with', glareGradientPolylines.length, 'elements');
-                console.log('🌈 Glare score range:', Math.min(...glarePoints.map(p => p.glare_score)).toFixed(3), 'to', Math.max(...glarePoints.map(p => p.glare_score)).toFixed(3));
+                console.log('Glare gradient displayed with', glareGradientPolylines.length, 'elements');
+                console.log('Glare score range:', Math.min(...glarePoints.map(p => p.glare_score)).toFixed(3), 'to', Math.max(...glarePoints.map(p => p.glare_score)).toFixed(3));
             }
 
             function displaySunDirectionArrows(glarePoints, route) {
@@ -761,7 +818,7 @@ export default function MapsScreen() {
                     return;
                 }
                 
-                console.log('🌅 Creating sun direction arrows');
+                console.log('Creating sun direction arrows');
                 
                 // Get start and end points of the route
                 const startPoint = {
@@ -787,7 +844,7 @@ export default function MapsScreen() {
                     createSunArrow(endPoint, endGlare.sun_azimuth, 'End: Sun Direction', '#FF3B30');
                 }
                 
-                console.log('🌅 Sun direction arrows created');
+                console.log('Sun direction arrows created');
             }
             
             function createSunArrow(position, sunAzimuth, title, color) {

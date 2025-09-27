@@ -53,7 +53,7 @@ export default function SunglareScreen() {
 
     setLoading(true);
     try {
-      // Create route data for the Maps tab
+      // Create route data for the Maps tab (without profile to force fresh analysis)
       const routeData = {
         start: {
           latitude: startLocation.latitude,
@@ -67,7 +67,16 @@ export default function SunglareScreen() {
         },
         name: `${startLocationText.split(',')[0]} to ${endLocationText.split(',')[0]}`,
         departureTime: departureTime.toISOString(),
+        // Explicitly set profile to undefined to ensure fresh analysis
+        profile: undefined,
       };
+
+      console.log('🚀 Starting new route analysis:', {
+        name: routeData.name,
+        departureTime: routeData.departureTime,
+        start: routeData.start.address,
+        end: routeData.end.address
+      });
 
       // Set the route in context and navigate to Maps tab
       setCurrentRoute(routeData);
