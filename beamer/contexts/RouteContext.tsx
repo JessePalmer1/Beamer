@@ -35,6 +35,8 @@ interface RouteContextType {
   setCurrentRoute: (route: AnalyzeRoute | null) => void;
   isAnalyzing: boolean;
   setIsAnalyzing: (analyzing: boolean) => void;
+  departureTime: Date;
+  setDepartureTime: (time: Date) => void;
 }
 
 const RouteContext = createContext<RouteContextType | undefined>(undefined);
@@ -54,12 +56,15 @@ interface RouteProviderProps {
 export const RouteProvider: React.FC<RouteProviderProps> = ({ children }) => {
   const [currentRoute, setCurrentRoute] = useState<AnalyzeRoute | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [departureTime, setDepartureTime] = useState<Date>(new Date());
 
   const value: RouteContextType = {
     currentRoute,
     setCurrentRoute,
     isAnalyzing,
     setIsAnalyzing,
+    departureTime,
+    setDepartureTime,
   };
 
   return (

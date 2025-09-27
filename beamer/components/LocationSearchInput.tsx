@@ -25,7 +25,7 @@ interface LocationSearchInputProps {
   value: string;
   onLocationSelect: (location: { latitude: number; longitude: number; address?: string }) => void;
   placeholder: string;
-  googleApiKey?: string;
+  apiUrl?: string;
 }
 
 export function LocationSearchInput({
@@ -33,7 +33,7 @@ export function LocationSearchInput({
   value,
   onLocationSelect,
   placeholder,
-  googleApiKey = '',
+  apiUrl = 'http://localhost:8000',
 }: LocationSearchInputProps) {
   const [searchText, setSearchText] = useState(value);
   const [suggestions, setSuggestions] = useState<LocationSuggestion[]>([]);
@@ -50,37 +50,41 @@ export function LocationSearchInput({
       return;
     }
 
-    // If Google API key is provided, use Google Places API
-    if (googleApiKey) {
-      try {
-        setLoading(true);
-        const response = await fetch(
-          `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
-            query
-          )}&key=${googleApiKey}&types=geocode`
-        );
-        const data = await response.json();
-        
-        if (data.predictions) {
-          const formattedSuggestions: LocationSuggestion[] = data.predictions.map((prediction: any) => ({
-            place_id: prediction.place_id,
-            description: prediction.description,
-            main_text: prediction.structured_formatting?.main_text || prediction.description,
-            secondary_text: prediction.structured_formatting?.secondary_text || '',
-          }));
-          setSuggestions(formattedSuggestions);
-          setShowSuggestions(true);
-        }
-      } catch (error) {
-        console.error('Error fetching places:', error);
-        // Fallback to mock suggestions for demo
-        generateMockSuggestions(query);
-      } finally {
-        setLoading(false);
+    try {
+      setLoading(true);
+      const response = await fetch(`${apiUrl}/api/places/autocomplete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          input: query,
+          types: 'geocode'
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status}`);
       }
-    } else {
-      // Use mock suggestions for demo purposes
+      
+      const data = await response.json();
+      
+      if (data.predictions) {
+        const formattedSuggestions: LocationSuggestion[] = data.predictions.map((prediction: any) => ({
+          place_id: prediction.place_id,
+          description: prediction.description,
+          main_text: prediction.structured_formatting?.main_text || prediction.description,
+          secondary_text: prediction.structured_formatting?.secondary_text || '',
+        }));
+        setSuggestions(formattedSuggestions);
+        setShowSuggestions(true);
+      }
+    } catch (error) {
+      console.error('Error fetching places:', error);
+      // Fallback to mock suggestions for demo
       generateMockSuggestions(query);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -126,16 +130,23 @@ export function LocationSearchInput({
       return;
     }
 
-    if (!googleApiKey) {
-      Alert.alert('Error', 'Unable to get location details. Please enter coordinates manually.');
-      return;
-    }
-
     try {
       setLoading(true);
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry&key=${googleApiKey}`
-      );
+      const response = await fetch(`${apiUrl}/api/places/details`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          place_id: placeId,
+          fields: 'geometry'
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status}`);
+      }
+      
       const data = await response.json();
       
       if (data.result?.geometry?.location) {

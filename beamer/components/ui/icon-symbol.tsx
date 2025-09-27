@@ -26,6 +26,8 @@ const MAPPING = {
   'trash': 'delete',
   'map': 'map',
   'list.bullet': 'list',
+  'calendar': 'calendar-today',
+  'clock': 'access-time',
 } as IconMapping;
 
 /**
