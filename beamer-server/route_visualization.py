@@ -115,11 +115,11 @@ def score_to_color_hex(score: float) -> str:
     """Green->Yellow->Red mapping."""
     s = max(0.0, min(1.0, float(score)))
     if s <= 0.4:
-        r = int(255 * (s * 2))
+        r = int(255 * (s * 2.5))
         g = 255
     else:
         r = 255
-        g = int(255 * (2 - s * 2))
+        g = int(255 * (1.6 - s * 1.6))
     b = 0
     return f"#{r:02x}{g:02x}{b:02x}"
 
