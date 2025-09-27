@@ -13,6 +13,7 @@ dependencies = [
     "pysolar>=0.13",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
+    "python-dotenv>=1.0.0",
     "tzdata>=2025.2",
     "uvicorn>=0.32.1",
 ]

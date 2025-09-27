@@ -12,6 +12,10 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import glare calculation functions
 from glare_index import glare_score, _angdiff, _clip, _elev_term, _solar

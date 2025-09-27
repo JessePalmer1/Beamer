@@ -14,6 +14,19 @@ import { useRoute } from '@/contexts/RouteContext';
 export default function ProfileScreen() {
   const { currentRoute, isAnalyzing } = useRoute();
 
+  // Debug logging to understand profile state
+  React.useEffect(() => {
+    console.log('👤 Profile screen - route state:', {
+      hasRoute: !!currentRoute,
+      hasProfile: !!currentRoute?.profile,
+      isAnalyzing,
+      routeName: currentRoute?.name,
+      profileSegments: currentRoute?.profile?.segments?.length || 0,
+      hasGlareAnalysis: !!currentRoute?.profile?.glareAnalysis,
+      profileError: currentRoute?.profile?.error
+    });
+  }, [currentRoute, isAnalyzing]);
+
   const getGlareColor = (glareScore: number) => {
     if (glareScore >= 0.7) return '#FF3B30'; // Red for high glare
     if (glareScore >= 0.3) return '#FF9500'; // Orange for medium glare
