@@ -1,0 +1,72 @@
+import React, { createContext, useContext, useState, ReactNode } from 'react';
+
+interface RouteLocation {
+  latitude: number;
+  longitude: number;
+  address?: string;
+}
+
+interface RouteSegment {
+  points: Array<{ lat: number; lng: number }>;
+  distance: number;
+  duration: number;
+  instruction: string;
+}
+
+interface RouteProfile {
+  segments: RouteSegment[];
+  totalDistance: number;
+  totalDuration: number;
+  polylinePoints: Array<{ lat: number; lng: number }>;
+  rawDirectionsData?: any; // Full Google Maps response for debugging
+  error?: string; // Error message if profile processing failed
+}
+
+interface AnalyzeRoute {
+  start: RouteLocation;
+  end: RouteLocation;
+  name?: string;
+  departureTime: string;
+  profile?: RouteProfile;
+}
+
+interface RouteContextType {
+  currentRoute: AnalyzeRoute | null;
+  setCurrentRoute: (route: AnalyzeRoute | null) => void;
+  isAnalyzing: boolean;
+  setIsAnalyzing: (analyzing: boolean) => void;
+}
+
+const RouteContext = createContext<RouteContextType | undefined>(undefined);
+
+export const useRoute = () => {
+  const context = useContext(RouteContext);
+  if (context === undefined) {
+    throw new Error('useRoute must be used within a RouteProvider');
+  }
+  return context;
+};
+
+interface RouteProviderProps {
+  children: ReactNode;
+}
+
+export const RouteProvider: React.FC<RouteProviderProps> = ({ children }) => {
+  const [currentRoute, setCurrentRoute] = useState<AnalyzeRoute | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  const value: RouteContextType = {
+    currentRoute,
+    setCurrentRoute,
+    isAnalyzing,
+    setIsAnalyzing,
+  };
+
+  return (
+    <RouteContext.Provider value={value}>
+      {children}
+    </RouteContext.Provider>
+  );
+};
+
+export type { AnalyzeRoute, RouteLocation, RouteProfile, RouteSegment };
