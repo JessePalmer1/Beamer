@@ -129,6 +129,6 @@ def animate_glare(lat, lon, start_time, heading_deg, minutes=60, step_min=2, int
 # Demo
 if __name__ == "__main__":
     lat, lon = 33.781, -84.388,
-    t0 = datetime(2025, 9, 27, 17, 45, tzinfo=ZoneInfo("America/New_York"))  # ~sunset window
+    t0 = datetime(2025, 9, 27, 17, 45, tzinfo=ZoneInfo("America/New_York"))
     t0 = datetime.now(timezone.utc)
     animate_glare(lat, lon, t0, heading_deg=270.0, minutes=290, step_min=2, interval_ms=120)
