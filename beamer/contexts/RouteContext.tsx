@@ -11,6 +11,8 @@ interface RouteSegment {
   distance: number;
   duration: number;
   instruction: string;
+  avgGlareScore?: number; // Average sun glare score for this segment
+  glareRiskLevel?: 'low' | 'medium' | 'high'; // Risk level based on glare score
 }
 
 interface RouteProfile {
@@ -20,6 +22,15 @@ interface RouteProfile {
   polylinePoints: Array<{ lat: number; lng: number }>;
   rawDirectionsData?: any; // Full Google Maps response for debugging
   error?: string; // Error message if profile processing failed
+  glareAnalysis?: {
+    totalPoints: number;
+    maxGlare: number;
+    minGlare: number;
+    avgGlare: number;
+    highGlarePoints: number;
+    departureTime: string;
+    arrivalTime: string;
+  }; // Overall glare statistics for the route
 }
 
 interface AnalyzeRoute {

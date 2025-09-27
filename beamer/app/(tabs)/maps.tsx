@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
+import { useFocusEffect } from '@react-navigation/native';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useRoute, RouteProfile, RouteSegment } from '@/contexts/RouteContext';
 import { config } from '@/config/environment';
@@ -24,6 +25,21 @@ export default function MapsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [lastLoadedRouteId, setLastLoadedRouteId] = useState<string | null>(null);
   const webViewRef = useRef<WebView>(null);
+
+  // Safety mechanism: If user navigates to maps tab and analyzing has been stuck for >30s, clear it
+  useFocusEffect(
+    React.useCallback(() => {
+      // If analyzing state has been true for too long, clear it
+      if (isAnalyzing) {
+        const timeoutId = setTimeout(() => {
+          console.log('Maps screen focus: clearing stuck analyzing state');
+          setIsAnalyzing(false);
+        }, 5000); // Clear after 5 seconds if still analyzing when tab focused
+        
+        return () => clearTimeout(timeoutId);
+      }
+    }, [isAnalyzing, setIsAnalyzing])
+  );
 
   // Update selected route when current route changes (but not when only profile changes)
   React.useEffect(() => {
@@ -132,7 +148,7 @@ export default function MapsScreen() {
           // No route to load, so stop analyzing
           setIsAnalyzing(false);
         }
-      } else if (data.type === 'routeProfile') {
+                } else if (data.type === 'routeProfile') {
         // Route profile received - reduced logging to prevent spam
         
         // Update the current route with profile data without triggering route reload
@@ -141,6 +157,54 @@ export default function MapsScreen() {
           const updatedRoute = {
             ...currentRoute,
             profile: data.profile as RouteProfile
+          };
+          setCurrentRoute(updatedRoute);
+        }
+      } else if (data.type === 'glareAnalysis') {
+        // Glare analysis data received - calculate per-segment averages
+        if (currentRoute?.profile && data.data) {
+          const glarePoints = data.data.glare_points;
+          const segments = currentRoute.profile.segments;
+          
+          // Calculate average glare score for each segment
+          const segmentsWithGlare = segments.map((segment, segmentIndex) => {
+            // Find glare points that belong to this segment
+            // This is a simplified approach - in practice you'd need to map glare points to segments more precisely
+            const segmentStartIndex = Math.floor((segmentIndex / segments.length) * glarePoints.length);
+            const segmentEndIndex = Math.floor(((segmentIndex + 1) / segments.length) * glarePoints.length);
+            const segmentGlarePoints = glarePoints.slice(segmentStartIndex, segmentEndIndex);
+            
+            let avgGlareScore = 0;
+            let glareRiskLevel: 'low' | 'medium' | 'high' = 'low';
+            
+            if (segmentGlarePoints.length > 0) {
+              avgGlareScore = segmentGlarePoints.reduce((sum: number, point: any) => sum + point.glare_score, 0) / segmentGlarePoints.length;
+              
+              // Determine risk level
+              if (avgGlareScore >= 0.7) {
+                glareRiskLevel = 'high';
+              } else if (avgGlareScore >= 0.3) {
+                glareRiskLevel = 'medium';
+              } else {
+                glareRiskLevel = 'low';
+              }
+            }
+            
+            return {
+              ...segment,
+              avgGlareScore,
+              glareRiskLevel
+            };
+          });
+          
+          // Update route with glare data
+          const updatedRoute = {
+            ...currentRoute,
+            profile: {
+              ...currentRoute.profile,
+              segments: segmentsWithGlare,
+              glareAnalysis: data.data.statistics
+            }
           };
           setCurrentRoute(updatedRoute);
         }
@@ -373,6 +437,7 @@ export default function MapsScreen() {
             // Store glare gradient visualization elements for cleanup
             let sunglareVisible = true;
             let glareGradientPolylines = [];  // Store gradient polylines
+            let sunDirectionArrows = [];     // Store sun direction arrows
 
             function clearRoute() {
                 if (directionsRenderer) {
@@ -390,6 +455,7 @@ export default function MapsScreen() {
                 
                 // Clear glare gradient visualization
                 clearGlareGradient();
+                clearSunDirectionArrows();
                 
                 currentRoute = null;
                 console.log('Route cleared');
@@ -414,6 +480,17 @@ export default function MapsScreen() {
                 console.log('Glare gradient cleared');
             }
 
+            function clearSunDirectionArrows() {
+                // Remove all sun direction arrows
+                sunDirectionArrows.forEach(arrow => {
+                    if (arrow) {
+                        arrow.setMap(null);
+                    }
+                });
+                sunDirectionArrows = [];
+                console.log('Sun direction arrows cleared');
+            }
+
             function toggleSunglareVisualization() {
                 sunglareVisible = !sunglareVisible;
                 
@@ -425,12 +502,26 @@ export default function MapsScreen() {
                         }
                     });
                     
+                    // Show sun direction arrows
+                    sunDirectionArrows.forEach(arrow => {
+                        if (arrow) {
+                            arrow.setMap(map);
+                        }
+                    });
+                    
                     console.log('Glare gradient visualization shown');
                 } else {
                     // Hide glare gradient visualization
                     glareGradientPolylines.forEach(element => {
                         if (element) {
                             element.setMap(null);
+                        }
+                    });
+                    
+                    // Hide sun direction arrows
+                    sunDirectionArrows.forEach(arrow => {
+                        if (arrow) {
+                            arrow.setMap(null);
                         }
                     });
                     
@@ -573,6 +664,9 @@ export default function MapsScreen() {
                     // Display gradient overlay on map
                     displayGlareGradient(glareData.glare_points);
                     
+                    // Display sun direction arrows at start and end points
+                    displaySunDirectionArrows(glareData.glare_points, currentRoute);
+                    
                     // Send glare data to React Native
                     window.ReactNativeWebView?.postMessage(JSON.stringify({
                         type: 'glareAnalysis',
@@ -656,6 +750,99 @@ export default function MapsScreen() {
                 
                 console.log('🌈 Glare gradient displayed with', glareGradientPolylines.length, 'elements');
                 console.log('🌈 Glare score range:', Math.min(...glarePoints.map(p => p.glare_score)).toFixed(3), 'to', Math.max(...glarePoints.map(p => p.glare_score)).toFixed(3));
+            }
+
+            function displaySunDirectionArrows(glarePoints, route) {
+                // Clear existing arrows
+                clearSunDirectionArrows();
+                
+                if (!glarePoints || glarePoints.length === 0 || !route) {
+                    console.log('No glare points or route data for sun arrows');
+                    return;
+                }
+                
+                console.log('🌅 Creating sun direction arrows');
+                
+                // Get start and end points of the route
+                const startPoint = {
+                    lat: route.start.latitude,
+                    lng: route.start.longitude
+                };
+                const endPoint = {
+                    lat: route.end.latitude, 
+                    lng: route.end.longitude
+                };
+                
+                // Find glare data for start and end points (use closest available)
+                const startGlare = glarePoints[0] || null;
+                const endGlare = glarePoints[glarePoints.length - 1] || null;
+                
+                // Create arrow at start point
+                if (startGlare) {
+                    createSunArrow(startPoint, startGlare.sun_azimuth, 'Start: Sun Direction', '#34C759');
+                }
+                
+                // Create arrow at end point  
+                if (endGlare) {
+                    createSunArrow(endPoint, endGlare.sun_azimuth, 'End: Sun Direction', '#FF3B30');
+                }
+                
+                console.log('🌅 Sun direction arrows created');
+            }
+            
+            function createSunArrow(position, sunAzimuth, title, color) {
+                // Calculate arrow end point (500 meters in sun direction)
+                const arrowLength = 500; // meters
+                const earthRadius = 6371000; // meters
+                
+                // Convert azimuth to radians (Google Maps uses degrees from North, clockwise)
+                const azimuthRad = (sunAzimuth * Math.PI) / 180;
+                
+                // Calculate offset in lat/lng
+                const latOffset = (arrowLength * Math.cos(azimuthRad)) / earthRadius * (180 / Math.PI);
+                const lngOffset = (arrowLength * Math.sin(azimuthRad)) / earthRadius * (180 / Math.PI) / Math.cos(position.lat * Math.PI / 180);
+                
+                const arrowEnd = {
+                    lat: position.lat + latOffset,
+                    lng: position.lng + lngOffset
+                };
+                
+                // Create arrow line
+                const arrowLine = new google.maps.Polyline({
+                    path: [position, arrowEnd],
+                    geodesic: true,
+                    strokeColor: color,
+                    strokeOpacity: 0.8,
+                    strokeWeight: 4,
+                    map: map,
+                    zIndex: 3000 // Above glare gradient
+                });
+                
+                // Create arrowhead using a marker with custom SVG
+                const arrowHead = new google.maps.Marker({
+                    position: arrowEnd,
+                    map: map,
+                    title: title + '\\nSun Azimuth: ' + sunAzimuth.toFixed(1) + '°',
+                    icon: {
+                        url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
+                            '<svg width="20" height="20" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">' +
+                                '<defs>' +
+                                    '<marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">' +
+                                        '<polygon points="0 0, 10 3.5, 0 7" fill="' + color + '" />' +
+                                    '</marker>' +
+                                '</defs>' +
+                                '<circle cx="10" cy="10" r="8" fill="' + color + '" stroke="white" stroke-width="2"/>' +
+                                '<text x="10" y="13" text-anchor="middle" fill="white" font-size="12" font-weight="bold">☀</text>' +
+                            '</svg>'
+                        ),
+                        scaledSize: new google.maps.Size(20, 20),
+                        anchor: new google.maps.Point(10, 10)
+                    }
+                });
+                
+                // Store both line and marker for cleanup
+                sunDirectionArrows.push(arrowLine);
+                sunDirectionArrows.push(arrowHead);
             }
 
             // Process route data for development/sun glare analysis

@@ -345,12 +345,17 @@ async def analyze_route_glare(request: GlareAnalysisRequest, req: Request):
     try:
         # Parse departure time
         try:
-            if request.timezone != "UTC":
-                # Parse with timezone
+            cleaned = request.departure_time
+            if cleaned.endswith("Z"):
+                cleaned = cleaned[:-1] + "+00:00"
+            base_departure_dt = datetime.fromisoformat(cleaned)
+            if base_departure_dt.tzinfo is None:
+                base_departure_dt = base_departure_dt.replace(tzinfo=timezone.utc)
+            if request.timezone and request.timezone != "UTC":
                 tz = ZoneInfo(request.timezone)
-                departure_dt = datetime.fromisoformat(request.departure_time.replace('Z', '')).replace(tzinfo=tz)
+                departure_dt = base_departure_dt.astimezone(tz)
             else:
-                departure_dt = datetime.fromisoformat(request.departure_time.replace('Z', '')).replace(tzinfo=timezone.utc)
+                departure_dt = base_departure_dt.astimezone(timezone.utc)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid departure_time format: {str(e)}")
         

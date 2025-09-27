@@ -34,9 +34,6 @@ export default function SunglareScreen() {
   const [saveName, setSaveName] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [selectedHour, setSelectedHour] = useState(new Date().getHours());
-  const [selectedMinute, setSelectedMinute] = useState(new Date().getMinutes());
 
   const handleStartLocationSelect = (location: {latitude: number; longitude: number; address?: string}) => {
     setStartLocation(location);
@@ -79,6 +76,12 @@ export default function SunglareScreen() {
       // Navigate to the maps tab
       router.push('/maps');
       
+      // Add a timeout fallback to clear loading state if something goes wrong
+      setTimeout(() => {
+        setIsAnalyzing(false);
+        console.log('Sunglare analysis timeout - clearing analyzing state');
+      }, 30000); // 30 second fallback timeout
+      
       Alert.alert(
         'Route Analysis',
         'Route visualization is now loading in the Maps tab. You can view the 3D route and terrain.',
@@ -86,6 +89,7 @@ export default function SunglareScreen() {
       );
     } catch (error) {
       Alert.alert('Error', 'Failed to prepare route visualization');
+      setIsAnalyzing(false); // Clear analyzing state on error
     } finally {
       setLoading(false);
     }
@@ -130,43 +134,21 @@ export default function SunglareScreen() {
     setSaveModalVisible(true);
   };
 
-  const openDatePicker = () => {
-    setSelectedDate(new Date(departureTime));
-    setShowDatePicker(true);
-  };
-
-  const openTimePicker = () => {
-    setSelectedHour(departureTime.getHours());
-    setSelectedMinute(departureTime.getMinutes());
-    setShowTimePicker(true);
-  };
-
-  const confirmDateSelection = () => {
+  const updateHour = (hour: number) => {
     const newDate = new Date(departureTime);
-    newDate.setFullYear(selectedDate.getFullYear());
-    newDate.setMonth(selectedDate.getMonth());
-    newDate.setDate(selectedDate.getDate());
-    setDepartureTime(newDate);
-    setShowDatePicker(false);
-  };
-
-  const confirmTimeSelection = () => {
-    const newDate = new Date(departureTime);
-    newDate.setHours(selectedHour);
-    newDate.setMinutes(selectedMinute);
-    setDepartureTime(newDate);
-    setShowTimePicker(false);
-  };
-
-  const adjustDate = (days: number) => {
-    const newDate = new Date(departureTime);
-    newDate.setDate(newDate.getDate() + days);
+    newDate.setHours(hour);
     setDepartureTime(newDate);
   };
 
-  const adjustTime = (minutes: number) => {
+  const updateMinute = (minute: number) => {
     const newDate = new Date(departureTime);
-    newDate.setMinutes(newDate.getMinutes() + minutes);
+    newDate.setMinutes(minute);
+    setDepartureTime(newDate);
+  };
+
+  const updateDay = (dayOffset: number) => {
+    const newDate = new Date(departureTime);
+    newDate.setDate(newDate.getDate() + dayOffset);
     setDepartureTime(newDate);
   };
 
@@ -224,57 +206,69 @@ export default function SunglareScreen() {
           <View style={styles.departureTimeContainer}>
             <Text style={styles.departureTimeLabel}>Departure Time</Text>
             
-            <View style={styles.dateTimeSection}>
-              <Text style={styles.dateTimeSubLabel}>Date</Text>
-              <View style={styles.dateTimeRow}>
-                <TouchableOpacity 
-                  style={styles.adjustButton}
-                  onPress={() => adjustDate(-1)}
-                >
-                  <Text style={styles.adjustButtonText}>-</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={styles.dateTimeDisplay}
-                  onPress={openDatePicker}
-                >
-                  <IconSymbol name="calendar" size={16} color="#FFA500" />
-                  <Text style={styles.dateTimeText}>{formatDate(departureTime)}</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={styles.adjustButton}
-                  onPress={() => adjustDate(1)}
-                >
-                  <Text style={styles.adjustButtonText}>+</Text>
-                </TouchableOpacity>
-              </View>
+            {/* Date Selector */}
+            <View style={styles.inlineDateTimeRow}>
+              <TouchableOpacity style={styles.dayButton} onPress={() => updateDay(-1)}>
+                <Text style={styles.dayButtonText}>Yesterday</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.dayButton} onPress={() => updateDay(0)}>
+                <Text style={styles.dayButtonText}>Today</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.dayButton} onPress={() => updateDay(1)}>
+                <Text style={styles.dayButtonText}>Tomorrow</Text>
+              </TouchableOpacity>
             </View>
 
-            <View style={styles.dateTimeSection}>
-              <Text style={styles.dateTimeSubLabel}>Time</Text>
-              <View style={styles.dateTimeRow}>
-                <TouchableOpacity 
-                  style={styles.adjustButton}
-                  onPress={() => adjustTime(-30)}
-                >
-                  <Text style={styles.adjustButtonText}>-30m</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={styles.dateTimeDisplay}
-                  onPress={openTimePicker}
-                >
-                  <IconSymbol name="clock" size={16} color="#FFA500" />
-                  <Text style={styles.dateTimeText}>{formatTime(departureTime)}</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={styles.adjustButton}
-                  onPress={() => adjustTime(30)}
-                >
-                  <Text style={styles.adjustButtonText}>+30m</Text>
-                </TouchableOpacity>
+            {/* Time Pickers */}
+            <View style={styles.timePickerRow}>
+              {/* Hour Picker */}
+              <View style={styles.timePickerColumn}>
+                <Text style={styles.timeLabel}>Hour</Text>
+                <ScrollView style={styles.timePicker} showsVerticalScrollIndicator={false}>
+                  {Array.from({length: 24}, (_, i) => i).map(hour => (
+                    <TouchableOpacity
+                      key={hour}
+                      style={[styles.timeOption, departureTime.getHours() === hour && styles.timeOptionSelected]}
+                      onPress={() => updateHour(hour)}
+                    >
+                      <Text style={[styles.timeOptionText, departureTime.getHours() === hour && styles.timeOptionTextSelected]}>
+                        {hour.toString().padStart(2, '0')}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Minute Picker */}
+              <View style={styles.timePickerColumn}>
+                <Text style={styles.timeLabel}>Min</Text>
+                <ScrollView style={styles.timePicker} showsVerticalScrollIndicator={false}>
+                  {Array.from({length: 12}, (_, i) => i * 5).map(minute => {
+                    const isSelected = Math.floor(departureTime.getMinutes() / 5) * 5 === minute;
+                    return (
+                      <TouchableOpacity
+                        key={minute}
+                        style={[styles.timeOption, isSelected && styles.timeOptionSelected]}
+                        onPress={() => updateMinute(minute)}
+                      >
+                        <Text style={[styles.timeOptionText, isSelected && styles.timeOptionTextSelected]}>
+                          {minute.toString().padStart(2, '0')}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
+              {/* Current Time Display */}
+              <View style={styles.currentTimeDisplay}>
+                <IconSymbol name="clock" size={20} color="#FFA500" />
+                <Text style={styles.currentTimeText}>
+                  {formatTime(departureTime)}
+                </Text>
+                <Text style={styles.currentDateText}>
+                  {formatDate(departureTime)}
+                </Text>
               </View>
             </View>
           </View>
@@ -369,174 +363,6 @@ export default function SunglareScreen() {
         </SafeAreaView>
       </Modal>
 
-      {/* Date Picker Modal */}
-      <Modal
-        visible={showDatePicker}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowDatePicker(false)}
-      >
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-              <Text style={styles.modalCancelButton}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Select Date</Text>
-            <TouchableOpacity onPress={confirmDateSelection}>
-              <Text style={styles.modalSaveButton}>Confirm</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.pickerContainer}>
-            <View style={styles.datePickerSection}>
-              <Text style={styles.pickerLabel}>Year</Text>
-              <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
-                {Array.from({length: 5}, (_, i) => new Date().getFullYear() + i).map(year => (
-                  <TouchableOpacity
-                    key={year}
-                    style={[styles.pickerOption, selectedDate.getFullYear() === year && styles.pickerOptionSelected]}
-                    onPress={() => {
-                      const newDate = new Date(selectedDate);
-                      newDate.setFullYear(year);
-                      setSelectedDate(newDate);
-                    }}
-                  >
-                    <Text style={[styles.pickerOptionText, selectedDate.getFullYear() === year && styles.pickerOptionTextSelected]}>
-                      {year}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-
-            <View style={styles.datePickerSection}>
-              <Text style={styles.pickerLabel}>Month</Text>
-              <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
-                {Array.from({length: 12}, (_, i) => i).map(month => (
-                  <TouchableOpacity
-                    key={month}
-                    style={[styles.pickerOption, selectedDate.getMonth() === month && styles.pickerOptionSelected]}
-                    onPress={() => {
-                      const newDate = new Date(selectedDate);
-                      newDate.setMonth(month);
-                      setSelectedDate(newDate);
-                    }}
-                  >
-                    <Text style={[styles.pickerOptionText, selectedDate.getMonth() === month && styles.pickerOptionTextSelected]}>
-                      {new Date(2024, month, 1).toLocaleDateString('en-US', { month: 'short' })}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-
-            <View style={styles.datePickerSection}>
-              <Text style={styles.pickerLabel}>Day</Text>
-              <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
-                {Array.from({length: new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate()}, (_, i) => i + 1).map(day => (
-                  <TouchableOpacity
-                    key={day}
-                    style={[styles.pickerOption, selectedDate.getDate() === day && styles.pickerOptionSelected]}
-                    onPress={() => {
-                      const newDate = new Date(selectedDate);
-                      newDate.setDate(day);
-                      setSelectedDate(newDate);
-                    }}
-                  >
-                    <Text style={[styles.pickerOptionText, selectedDate.getDate() === day && styles.pickerOptionTextSelected]}>
-                      {day}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </SafeAreaView>
-      </Modal>
-
-      {/* Time Picker Modal */}
-      <Modal
-        visible={showTimePicker}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowTimePicker(false)}
-      >
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowTimePicker(false)}>
-              <Text style={styles.modalCancelButton}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Select Time</Text>
-            <TouchableOpacity onPress={confirmTimeSelection}>
-              <Text style={styles.modalSaveButton}>Confirm</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.timePickerContainer}>
-            <View style={styles.timePickerSection}>
-              <Text style={styles.pickerLabel}>Hour</Text>
-              <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
-                {Array.from({length: 24}, (_, i) => i).map(hour => (
-                  <TouchableOpacity
-                    key={hour}
-                    style={[styles.pickerOption, selectedHour === hour && styles.pickerOptionSelected]}
-                    onPress={() => setSelectedHour(hour)}
-                  >
-                    <Text style={[styles.pickerOptionText, selectedHour === hour && styles.pickerOptionTextSelected]}>
-                      {hour.toString().padStart(2, '0')}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-
-            <View style={styles.timePickerSection}>
-              <Text style={styles.pickerLabel}>Minute</Text>
-              <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
-                {Array.from({length: 60}, (_, i) => i).filter(min => min % 5 === 0).map(minute => (
-                  <TouchableOpacity
-                    key={minute}
-                    style={[styles.pickerOption, selectedMinute === minute && styles.pickerOptionSelected]}
-                    onPress={() => setSelectedMinute(minute)}
-                  >
-                    <Text style={[styles.pickerOptionText, selectedMinute === minute && styles.pickerOptionTextSelected]}>
-                      {minute.toString().padStart(2, '0')}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-
-          <View style={styles.quickTimeButtons}>
-            <Text style={styles.quickTimeLabel}>Quick Times</Text>
-            <View style={styles.quickTimeRow}>
-              {[
-                { label: 'Sunrise', hour: 6, minute: 30 },
-                { label: 'Morning', hour: 9, minute: 0 },
-                { label: 'Noon', hour: 12, minute: 0 },
-                { label: 'Afternoon', hour: 15, minute: 0 },
-                { label: 'Sunset', hour: 18, minute: 30 },
-                { label: 'Evening', hour: 20, minute: 0 },
-              ].map(time => (
-                <TouchableOpacity
-                  key={time.label}
-                  style={styles.quickTimeButton}
-                  onPress={() => {
-                    setSelectedHour(time.hour);
-                    setSelectedMinute(time.minute);
-                  }}
-                >
-                  <Text style={styles.quickTimeButtonText}>{time.label}</Text>
-                  <Text style={styles.quickTimeButtonTime}>
-                    {time.hour.toString().padStart(2, '0')}:{time.minute.toString().padStart(2, '0')}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        </SafeAreaView>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -588,51 +414,87 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginBottom: 16,
   },
-  dateTimeSection: {
-    marginBottom: 12,
-  },
-  dateTimeSubLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#FFA500',
-    marginBottom: 8,
-  },
-  dateTimeRow: {
+  inlineDateTimeRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  dateTimeDisplay: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
     gap: 8,
-    backgroundColor: '#222',
-    borderWidth: 1,
-    borderColor: '#444',
-    borderRadius: 12,
-    padding: 12,
-    justifyContent: 'center',
   },
-  dateTimeText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  adjustButton: {
+  dayButton: {
+    flex: 1,
     backgroundColor: '#333',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: '#555',
+  },
+  dayButtonText: {
+    color: '#FFA500',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  timePickerRow: {
+    flexDirection: 'row',
+    height: 120,
+    gap: 12,
+  },
+  timePickerColumn: {
+    flex: 1,
+  },
+  timeLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFA500',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  timePicker: {
+    backgroundColor: '#222',
     borderRadius: 8,
-    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#444',
+  },
+  timeOption: {
     paddingVertical: 8,
-    minWidth: 50,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  timeOptionSelected: {
+    backgroundColor: '#FFA500',
+  },
+  timeOptionText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '500',
+  },
+  timeOptionTextSelected: {
+    color: '#000',
+    fontWeight: '600',
+  },
+  currentTimeDisplay: {
+    flex: 1,
+    backgroundColor: '#222',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#444',
+    padding: 12,
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  adjustButtonText: {
-    color: '#FFA500',
-    fontSize: 12,
+  currentTimeText: {
+    fontSize: 18,
+    color: '#fff',
     fontWeight: '600',
+    marginTop: 8,
+  },
+  currentDateText: {
+    fontSize: 12,
+    color: '#aaa',
+    marginTop: 4,
   },
   buttonContainer: {
     gap: 12,
@@ -860,96 +722,5 @@ const styles = StyleSheet.create({
   previewAddress: {
     fontSize: 14,
     color: '#fff',
-  },
-  // Date/Time Picker Styles
-  pickerContainer: {
-    flexDirection: 'row',
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 20,
-  },
-  timePickerContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    height: 300,
-  },
-  datePickerSection: {
-    flex: 1,
-    marginHorizontal: 5,
-  },
-  timePickerSection: {
-    flex: 1,
-    marginHorizontal: 10,
-  },
-  pickerLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFA500',
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  pickerScroll: {
-    backgroundColor: '#222',
-    borderRadius: 12,
-    maxHeight: 200,
-  },
-  pickerOption: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-    alignItems: 'center',
-  },
-  pickerOptionSelected: {
-    backgroundColor: '#FFA500',
-  },
-  pickerOptionText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '500',
-  },
-  pickerOptionTextSelected: {
-    color: '#000',
-    fontWeight: '600',
-  },
-  quickTimeButtons: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 20,
-  },
-  quickTimeLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  quickTimeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  quickTimeButton: {
-    backgroundColor: '#333',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    minWidth: 80,
-    borderWidth: 1,
-    borderColor: '#555',
-  },
-  quickTimeButtonText: {
-    fontSize: 12,
-    color: '#FFA500',
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  quickTimeButtonTime: {
-    fontSize: 14,
-    color: '#fff',
-    fontWeight: '500',
   },
 });

@@ -14,6 +14,21 @@ import { useRoute } from '@/contexts/RouteContext';
 export default function ProfileScreen() {
   const { currentRoute, isAnalyzing } = useRoute();
 
+  const getGlareColor = (glareScore: number) => {
+    if (glareScore >= 0.7) return '#FF3B30'; // Red for high glare
+    if (glareScore >= 0.3) return '#FF9500'; // Orange for medium glare
+    return '#34C759'; // Green for low glare
+  };
+
+  const getGlareRiskText = (riskLevel: 'low' | 'medium' | 'high') => {
+    switch (riskLevel) {
+      case 'high': return 'High Risk';
+      case 'medium': return 'Medium Risk';
+      case 'low': return 'Low Risk';
+      default: return 'Unknown';
+    }
+  };
+
   const copyToClipboard = async () => {
     if (!currentRoute?.profile) {
       Alert.alert('No Data', 'No route profile data available to copy');
@@ -100,6 +115,22 @@ export default function ProfileScreen() {
           <Text style={styles.summaryLabel}>Total Points:</Text>
           <Text style={styles.summaryValue}>{profile.polylinePoints.length}</Text>
         </View>
+        
+        {profile.glareAnalysis && (
+          <>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Avg Glare Score:</Text>
+              <Text style={[styles.summaryValue, { color: getGlareColor(profile.glareAnalysis.avgGlare) }]}>
+                {(profile.glareAnalysis.avgGlare * 100).toFixed(1)}%
+              </Text>
+            </View>
+            
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>High Glare Points:</Text>
+              <Text style={styles.summaryValue}>{profile.glareAnalysis.highGlarePoints}</Text>
+            </View>
+          </>
+        )}
       </View>
     );
   };
@@ -128,7 +159,23 @@ export default function ProfileScreen() {
               <Text style={styles.segmentDetail}>
                 Duration: {Math.round(segment.duration / 60)} min
               </Text>
+              {segment.avgGlareScore !== undefined && (
+                <Text style={styles.segmentDetail}>
+                  Avg Glare: <Text style={{ color: getGlareColor(segment.avgGlareScore) }}>
+                    {(segment.avgGlareScore * 100).toFixed(1)}%
+                  </Text>
+                </Text>
+              )}
             </View>
+            
+            {segment.glareRiskLevel && (
+              <View style={styles.glareRiskContainer}>
+                <Text style={styles.glareRiskLabel}>Sun Glare Risk:</Text>
+                <Text style={[styles.glareRiskValue, { color: getGlareColor(segment.avgGlareScore || 0) }]}>
+                  {getGlareRiskText(segment.glareRiskLevel)}
+                </Text>
+              </View>
+            )}
             
             <View style={styles.segmentCoords}>
               <Text style={styles.coordLabel}>Start:</Text>
@@ -391,5 +438,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#fff',
     fontFamily: 'monospace',
+  },
+  glareRiskContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+  },
+  glareRiskLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFA500',
+  },
+  glareRiskValue: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
