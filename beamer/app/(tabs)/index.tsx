@@ -71,7 +71,7 @@ export default function SunglareScreen() {
         profile: undefined,
       };
 
-      console.log('🚀 Starting new route analysis:', {
+      console.log('Starting new route analysis:', {
         name: routeData.name,
         departureTime: routeData.departureTime,
         start: routeData.start.address,
