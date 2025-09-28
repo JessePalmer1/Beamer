@@ -1146,7 +1146,7 @@ export default function TerrainScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <View style={styles.titleContainer}>
           <IconSymbol name="globe" size={28} color="#FFA500" />

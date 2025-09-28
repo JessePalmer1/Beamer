@@ -29,13 +29,6 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="globe"
-        options={{
-          title: 'Terrain',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="globe" color={color} />,
-        }}
-      />
-      <Tabs.Screen
         name="maps"
         options={{
           title: 'Maps',
@@ -47,6 +40,13 @@ export default function TabLayout() {
         options={{
           title: 'Profile',
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="list.bullet" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="globe"
+        options={{
+          title: 'Terrain',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="globe" color={color} />,
         }}
       />
     </Tabs>

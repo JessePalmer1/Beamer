@@ -139,7 +139,7 @@ export default function SavedLocationsScreen() {
 
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <View style={styles.titleContainer}>
           <IconSymbol name="location.fill" size={28} color="#FFA500" />
@@ -198,7 +198,7 @@ export default function SavedLocationsScreen() {
                   </View>
                 ) : (
                   <View style={styles.analyzeButtonContent}>
-                    <IconSymbol name="sun.max.fill" size={16} color="#fff" />
+                    <IconSymbol name="sun.max.fill" size={16} color="#000" />
                     <Text style={styles.analyzeButtonText}>Analyze Sunglare</Text>
                   </View>
                 )}
@@ -470,7 +470,7 @@ const styles = StyleSheet.create({
     borderColor: '#444',
   },
   analyzeButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#fff',
     borderRadius: 8,
     paddingVertical: 12,
     paddingHorizontal: 16,
@@ -486,7 +486,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   analyzeButtonText: {
-    color: '#fff',
+    color: '#000',
     fontSize: 14,
     fontWeight: '600',
   },

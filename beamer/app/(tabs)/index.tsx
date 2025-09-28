@@ -20,6 +20,22 @@ import { LocationSearchInput } from '@/components/LocationSearchInput';
 import { config } from '@/config/environment';
 import { useSavedLocations } from '@/contexts/SavedLocationsContext';
 import { useRoute } from '@/contexts/RouteContext';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
+
+const FIVE_MIN_MS = 5 * 60 * 1000;
+
+const roundUpTo5 = (d: Date) => new Date(Math.ceil(d.getTime() / FIVE_MIN_MS) * FIVE_MIN_MS);
+
+const clampToEarliest = (d: Date) => {
+  const earliest = roundUpTo5(new Date());
+  return d.getTime() < earliest.getTime() ? earliest : d;
+};
+
+
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const isSameYMD = (a: Date, b: Date) =>
+  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 export default function SunglareScreen() {
   const { addSavedLocation } = useSavedLocations();
@@ -34,6 +50,12 @@ export default function SunglareScreen() {
   const [saveName, setSaveName] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [isDateTimePickerVisible, setDateTimePickerVisible] = useState(false);
+
+  // Precompute day chips (Today → +6 days)
+  const today0 = startOfDay(new Date());
+  const dayOptions = Array.from({ length: 7 }, (_, i) => addDays(today0, i));
+  const selectedDay = startOfDay(departureTime);
 
   const handleStartLocationSelect = (location: {latitude: number; longitude: number; address?: string}) => {
     setStartLocation(location);
@@ -44,6 +66,7 @@ export default function SunglareScreen() {
     setEndLocation(location);
     setEndLocationText(location.address || `${location.latitude}, ${location.longitude}`);
   };
+
 
   const analyzeSunglare = async () => {
     if (!startLocation || !endLocation) {
@@ -180,16 +203,16 @@ export default function SunglareScreen() {
 
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
         <Image
             source={require('@/assets/images/logo.png')}
             style={styles.logo}
             resizeMode="contain"
+
           />
           <View style={styles.titleContainer}>
-            <IconSymbol name="sun.max.fill" size={32} color="#FFA500" />
             <Text style={styles.title}>Beamed</Text>
           </View>
           <Text style={styles.subtitle}>Sunglare Analysis for Safe Driving</Text>
@@ -214,72 +237,85 @@ export default function SunglareScreen() {
 
           <View style={styles.departureTimeContainer}>
             <Text style={styles.departureTimeLabel}>Departure Time</Text>
-            
-            {/* Date Selector */}
+
+            {/* Quick picks */}
             <View style={styles.inlineDateTimeRow}>
-              <TouchableOpacity style={styles.dayButton} onPress={() => updateDay(-1)}>
-                <Text style={styles.dayButtonText}>Yesterday</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.dayButton} onPress={() => updateDay(0)}>
-                <Text style={styles.dayButtonText}>Today</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.dayButton} onPress={() => updateDay(1)}>
-                <Text style={styles.dayButtonText}>Tomorrow</Text>
-              </TouchableOpacity>
+              {[
+                { label: 'ASAP', mins: 0 },
+                { label: '+10m', mins: 10 },
+                { label: '+30m', mins: 30 },
+                { label: '+1h', mins: 60 },
+              ].map(({ label, mins }) => (
+                <TouchableOpacity
+                  key={label}
+                  style={styles.quickChip}
+                  onPress={() => setDepartureTime(roundUpTo5(new Date(Date.now() + mins * 60000)))}
+                >
+                  <Text style={styles.quickChipText}>{label}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
 
-            {/* Time Pickers */}
-            <View style={styles.timePickerRow}>
-              {/* Hour Picker */}
-              <View style={styles.timePickerColumn}>
-                <Text style={styles.timeLabel}>Hour</Text>
-                <ScrollView style={styles.timePicker} showsVerticalScrollIndicator={false}>
-                  {Array.from({length: 24}, (_, i) => i).map(hour => (
-                    <TouchableOpacity
-                      key={hour}
-                      style={[styles.timeOption, departureTime.getHours() === hour && styles.timeOptionSelected]}
-                      onPress={() => updateHour(hour)}
-                    >
-                      <Text style={[styles.timeOptionText, departureTime.getHours() === hour && styles.timeOptionTextSelected]}>
-                        {hour.toString().padStart(2, '0')}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
+            {/* Day chips (future only) */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+              {dayOptions.map((d) => {
+                const selected = isSameYMD(d, departureTime);
+                // Keep current H:M when switching days, then clamp forward if needed
+                const onSelectDay = () => {
+                  const next = new Date(d);
+                  next.setHours(departureTime.getHours(), departureTime.getMinutes(), 0, 0);
+                  setDepartureTime(clampToEarliest(next));
+                };
+                const label = isSameYMD(d, today0)
+                  ? 'Today'
+                  : isSameYMD(d, addDays(today0, 1))
+                  ? 'Tomorrow'
+                  : d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
-              {/* Minute Picker */}
-              <View style={styles.timePickerColumn}>
-                <Text style={styles.timeLabel}>Min</Text>
-                <ScrollView style={styles.timePicker} showsVerticalScrollIndicator={false}>
-                  {Array.from({length: 12}, (_, i) => i * 5).map(minute => {
-                    const isSelected = Math.floor(departureTime.getMinutes() / 5) * 5 === minute;
-                    return (
-                      <TouchableOpacity
-                        key={minute}
-                        style={[styles.timeOption, isSelected && styles.timeOptionSelected]}
-                        onPress={() => updateMinute(minute)}
-                      >
-                        <Text style={[styles.timeOptionText, isSelected && styles.timeOptionTextSelected]}>
-                          {minute.toString().padStart(2, '0')}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
+                return (
+                  <TouchableOpacity
+                    key={d.toISOString()}
+                    onPress={onSelectDay}
+                    style={[styles.dayChip, selected && styles.dayChipSelected]}
+                    accessibilityState={{ selected }}
+                  >
+                    <Text style={[styles.dayChipText, selected && styles.dayChipTextSelected]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
 
-              {/* Current Time Display */}
-              <View style={styles.currentTimeDisplay}>
-                <IconSymbol name="clock" size={20} color="#FFA500" />
-                <Text style={styles.currentTimeText}>
+            {/* One-tap modal to pick both date & time (future-only) */}
+            <TouchableOpacity
+              onPress={() => setDateTimePickerVisible(true)}
+              style={styles.dateTimeButton}
+            >
+              <IconSymbol name="calendar.badge.clock" size={20} color="#FFA500" />
+              <View style={{ marginLeft: 10 }}>
+                <Text style={styles.dateTimeButtonTitle}>
                   {formatTime(departureTime)}
                 </Text>
-                <Text style={styles.currentDateText}>
-                  {formatDate(departureTime)}
+                <Text style={styles.dateTimeButtonSub}>
+                  {formatDate(departureTime)} · Local time
                 </Text>
               </View>
-            </View>
+            </TouchableOpacity>
+
+            <DateTimePickerModal
+              isVisible={isDateTimePickerVisible}
+              mode="datetime"
+              // If current selection is past (e.g., from old state), default to "now"
+              date={departureTime.getTime() < Date.now() ? roundUpTo5(new Date()) : departureTime}
+              minimumDate={new Date()}            // ← blocks past dates
+              minuteInterval={5}                  // iOS UI hint; we still hard-round after
+              is24Hour={false}
+              onConfirm={(picked : Date) => {
+                setDateTimePickerVisible(false);
+                // Round to 5-minute grid & clamp to >= now
+                setDepartureTime(clampToEarliest(roundUpTo5(picked)));
+              }}
+              onCancel={() => setDateTimePickerVisible(false)}
+            />
           </View>
 
           <View style={styles.buttonContainer}>
@@ -295,7 +331,7 @@ export default function SunglareScreen() {
                 </View>
               ) : (
                 <View style={styles.buttonContent}>
-                  <IconSymbol name="sun.max.fill" size={20} color="#fff" />
+                  <IconSymbol name="sun.max.fill" size={20} color="#000" />
                   <Text style={styles.buttonText}>Analyze Sunglare</Text>
                 </View>
               )}
@@ -390,8 +426,8 @@ const styles = StyleSheet.create({
     paddingTop: 20,
   },
   logo: {
-    width: 80,
-    height: 80,
+    width: 150,
+    height: 150,
     marginBottom: 16,
   },
   titleContainer: {
@@ -510,7 +546,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   analyzeButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -532,7 +568,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   buttonText: {
-    color: '#fff',
+    color: '#000',
     fontSize: 18,
     fontWeight: '600',
   },
@@ -732,4 +768,49 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#fff',
   },
+  quickChip: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: '#2b2f3a',
+    borderWidth: 1,
+    borderColor: '#3a3f4b',
+  },
+  quickChipText: { color: '#e8e8e8', fontSize: 14, fontWeight: '600' },
+  
+  dayChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#1f2430',
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#2e3440',
+  },
+  dayChipSelected: {
+    backgroundColor: '#FFA50022',
+    borderColor: '#FFA500',
+  },
+  dayChipText: {
+    fontSize: 14,
+    color: '#cfd3dc',
+  },
+  dayChipTextSelected: {
+    color: '#FFA500',
+    fontWeight: '700',
+  },
+  
+  dateTimeButton: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#222',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#444',
+    padding: 14,
+  },
+  dateTimeButtonTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  dateTimeButtonSub: { color: '#aaa', fontSize: 12, marginTop: 2 },
 });
