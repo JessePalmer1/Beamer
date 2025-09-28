@@ -150,7 +150,7 @@ export default function MapsScreen() {
         }
                 } else if (data.type === 'routeProfile') {
         // Route profile received
-        console.log('📊 Route profile received:', {
+        console.log('Route profile received:', {
           segments: data.profile.segments?.length || 0,
           totalDistance: data.profile.totalDistance,
           totalDuration: data.profile.totalDuration,
@@ -165,9 +165,9 @@ export default function MapsScreen() {
             profile: data.profile as RouteProfile
           };
           setCurrentRoute(updatedRoute);
-          console.log('📊 Route context updated with profile data');
+          console.log('Route context updated with profile data');
         } else {
-          console.warn('📊 Cannot update route profile - no current route');
+          console.warn('Cannot update route profile - no current route');
         }
       } else if (data.type === 'glareAnalysis') {
         // Glare analysis data received - calculate per-segment averages
@@ -212,7 +212,7 @@ export default function MapsScreen() {
               }
             }
 
-            console.log(`🌞 Segment ${segmentIndex}: ${segmentGlarePoints.length} points, avg score: ${avgGlareScore.toFixed(3)}, risk: ${glareRiskLevel}`);
+            console.log(`Segment ${segmentIndex}: ${segmentGlarePoints.length} points, avg score: ${avgGlareScore.toFixed(3)}, risk: ${glareRiskLevel}`);
 
             return {
               ...segment,
@@ -330,7 +330,7 @@ export default function MapsScreen() {
         <div id="map"></div>
         
         <div class="controls">
-            <button class="control-btn" onclick="toggle3D()">🌐 3D View</button>
+            <button class="control-btn" onclick="toggle3D()">3D View</button>
             <button class="control-btn" onclick="fitToRoute()">Fit Route</button>
             <button class="control-btn" onclick="toggleSunglareVisualization()">Sun Glare</button>
             <button class="control-btn clear-btn" onclick="clearRoute()">Clear</button>

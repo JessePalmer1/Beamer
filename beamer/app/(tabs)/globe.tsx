@@ -344,7 +344,7 @@ const threeTerrainHtml = `
             geometry.computeVertexNormals();
             
             // Load satellite imagery texture
-            console.log('🛰️ SATELLITE IMAGERY: Loading satellite imagery for terrain...');
+            console.log('SATELLITE IMAGERY: Loading satellite imagery for terrain...');
             const satelliteTexture = await loadSatelliteTexture(location, 14);
             
             let material;
@@ -354,7 +354,7 @@ const threeTerrainHtml = `
                     map: satelliteTexture,
                     side: THREE.DoubleSide
                 });
-                console.log('🛰️ SATELLITE IMAGERY: Successfully applied satellite imagery to terrain');
+                console.log('SATELLITE IMAGERY: Successfully applied satellite imagery to terrain');
             } else {
                 // Fallback to height-based coloring if texture loading fails
                 console.log('Falling back to height-based terrain coloring');
@@ -414,7 +414,7 @@ const threeTerrainHtml = `
         }
         
         function forceCleanupScene() {
-            console.log('🧹 FORCE CLEANUP: Starting aggressive scene cleanup');
+            console.log('FORCE CLEANUP: Starting aggressive scene cleanup');
             
             // Log scene before cleanup
             logSceneStats();
@@ -424,18 +424,18 @@ const threeTerrainHtml = `
             scene.traverse((child) => {
                 if (child !== scene && !child.isLight && child !== camera) {
                     objectsToRemove.push(child);
-                    console.log('🧹 MARKED FOR REMOVAL:', child.constructor.name, child.uuid);
+                    console.log('MARKED FOR REMOVAL:', child.constructor.name, child.uuid);
                 }
             });
             
-            console.log('🧹 FORCE CLEANUP: Found', objectsToRemove.length, 'objects to remove');
+            console.log('FORCE CLEANUP: Found', objectsToRemove.length, 'objects to remove');
             
             // Remove and dispose of all objects
             let disposedGeometries = 0;
             let disposedMaterials = 0;
             
             objectsToRemove.forEach((object, index) => {
-                console.log('🧹 REMOVING OBJECT', index + 1, '/', objectsToRemove.length, ':', object.constructor.name);
+                console.log('REMOVING OBJECT', index + 1, '/', objectsToRemove.length, ':', object.constructor.name);
                 
                 if (object.parent) {
                     object.parent.remove(object);
@@ -474,8 +474,8 @@ const threeTerrainHtml = `
                 renderer.render(scene, camera);
             }
             
-            console.log('🧹 FORCE CLEANUP: Disposed', disposedGeometries, 'geometries and', disposedMaterials, 'materials');
-            console.log('🧹 FORCE CLEANUP: Scene cleaned, logging final state:');
+            console.log('FORCE CLEANUP: Disposed', disposedGeometries, 'geometries and', disposedMaterials, 'materials');
+            console.log('FORCE CLEANUP: Scene cleaned, logging final state:');
             
             // Log scene after cleanup
             logSceneStats();

@@ -16,7 +16,7 @@ export default function ProfileScreen() {
 
   // Debug logging to understand profile state
   React.useEffect(() => {
-    console.log('👤 Profile screen - route state:', {
+    console.log('Profile screen - route state:', {
       hasRoute: !!currentRoute,
       hasProfile: !!currentRoute?.profile,
       isAnalyzing,
