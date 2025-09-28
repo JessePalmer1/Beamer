@@ -213,7 +213,7 @@ export default function SunglareScreen() {
 
           />
           <View style={styles.titleContainer}>
-            <Text style={styles.title}>Beamed</Text>
+            <Text style={styles.title}>GlareGuard</Text>
           </View>
           <Text style={styles.subtitle}>Sunglare Analysis for Safe Driving</Text>
         </View>

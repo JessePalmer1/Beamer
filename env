@@ -1,0 +1,17 @@
+# Google Places API Key for location autocomplete
+# Get your API key from: https://developers.google.com/maps/documentation/places/web-service/get-api-key
+# Enable the Places API and Geocoding API in your Google Cloud Console
+GOOGLE_PLACES_API_KEY=AIzaSyDE11pkLaUTlqc0UjwmuvXY2pOhX4pMngA
+
+# Google Maps API Key for 3D map visualization
+# Use the same key as above or create a separate one for Maps JavaScript API
+# Enable the Maps JavaScript API and Directions API in your Google Cloud Console
+GOOGLE_MAPS_API_KEY=AIzaSyDE11pkLaUTlqc0UjwmuvXY2pOhX4pMngA
+
+# Sunglare API Server URL
+# Change this if your server is running on a different host/port
+EXPO_PUBLIC_SUNGLARE_API_URL=http://localhost:8000
+
+# Demo mode - set to true to use mock location suggestions
+# when Google Places API key is not provided
+EXPO_PUBLIC_DEMO_MODE=false
