@@ -136,10 +136,6 @@ export default function ProfileScreen() {
           <Text style={styles.summaryValue}>{profile.segments.length}</Text>
         </View>
 
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Total Points:</Text>
-          <Text style={styles.summaryValue}>{profile.polylinePoints.length}</Text>
-        </View>
 
         {/* New weighted glare row */}
         <View style={styles.summaryRow}>
@@ -154,14 +150,6 @@ export default function ProfileScreen() {
           </Text>
         </View>
 
-        {profile.glareAnalysis && (
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>High Glare Points:</Text>
-            <Text style={styles.summaryValue}>
-              {profile.glareAnalysis.highGlarePoints}
-            </Text>
-          </View>
-        )}
       </View>
     );
   };
@@ -229,7 +217,7 @@ export default function ProfileScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <View style={styles.titleContainer}>
@@ -281,13 +269,6 @@ export default function ProfileScreen() {
             </View>
 
             {renderProfileSummary()}
-
-            <TouchableOpacity style={styles.exportButton} onPress={copyToClipboard}>
-              <View style={styles.buttonContent}>
-                <IconSymbol name="paperplane.fill" size={18} color="#fff" />
-                <Text style={styles.exportButtonText}>Export JSON Profile</Text>
-              </View>
-            </TouchableOpacity>
 
             {renderSegmentsList()}
           </>
