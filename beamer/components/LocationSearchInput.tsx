@@ -335,11 +335,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   inputIcon: {
-    marginRight: 12,
+    marginRight: 0,
   },
   input: {
     flex: 1,
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     fontSize: 16,
     color: '#fff',
   },

@@ -178,15 +178,15 @@ export default function MapsScreen() {
           const glarePoints = data.data.glare_points;
           const segments = currentRoute.profile.segments;
 
-          // Log sample glare points for debugging
-          if (glarePoints.length > 0) {
-            console.log('Sample glare points:', glarePoints.slice(0, 3).map(p => ({
-              lat: p.lat,
-              lng: p.lng,
-              score: p.glare_score,
-              color: p.color
-            })));
-          }
+          // // Log sample glare points for debugging
+          // if (glarePoints.length > 0) {
+          //   console.log('Sample glare points:', glarePoints.slice(0, 3).map(p : {lat : } => ({
+          //     lat: p.lat,
+          //     lng: p.lng,
+          //     score: p.glare_score,
+          //     color: p.color
+          //   })));
+          // }
 
           // Calculate average glare score for each segment
           const segmentsWithGlare = segments.map((segment, segmentIndex) => {
@@ -1033,18 +1033,7 @@ export default function MapsScreen() {
   `;
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.titleContainer}>
-          <IconSymbol name="map" size={28} color="#FFA500" />
-          <Text style={styles.title}>Route Visualization</Text>
-        </View>
-        <Text style={styles.subtitle}>
-          {isAnalyzing ? 'Loading route...' : 
-           selectedRoute ? `Route: ${selectedRoute.name || 'Selected Route'}` : 
-           'Select a route from Sunglare or Saved tabs to visualize'}
-        </Text>
-      </View>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
 
       <View style={styles.mapContainer}>
         <WebView
@@ -1074,59 +1063,7 @@ export default function MapsScreen() {
         )}
       </View>
 
-      <View style={styles.controlsContainer}>
-        <TouchableOpacity style={styles.controlButton} onPress={toggle3DView}>
-          <IconSymbol name="globe" size={20} color="#fff" />
-          <Text style={styles.controlButtonText}>3D View</Text>
-        </TouchableOpacity>
-        
-        {selectedRoute && (
-          <>
-            <TouchableOpacity style={styles.controlButton} onPress={fitToRoute}>
-              <IconSymbol name="location.fill" size={20} color="#fff" />
-              <Text style={styles.controlButtonText}>Fit Route</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={[styles.controlButton, styles.sunglareButton]} onPress={toggleSunglareView}>
-              <IconSymbol name="sun.max.fill" size={20} color="#fff" />
-              <Text style={styles.controlButtonText}>Sun Glare</Text>
-            </TouchableOpacity>
-          </>
-        )}
-        
-        <TouchableOpacity 
-          style={[styles.controlButton, styles.clearButton]} 
-          onPress={clearRoute}
-        >
-          <Text style={styles.controlButtonText}>Clear</Text>
-        </TouchableOpacity>
-      </View>
 
-      <View style={styles.infoContainer}>
-        <Text style={styles.infoTitle}>3D Map Features</Text>
-        <View style={styles.infoGrid}>
-          <View style={styles.infoItem}>
-            <IconSymbol name="sun.max.fill" size={16} color="#FFA500" />
-            <Text style={styles.infoText}>Satellite View</Text>
-          </View>
-          <View style={styles.infoItem}>
-            <IconSymbol name="globe" size={16} color="#FFA500" />
-            <Text style={styles.infoText}>3D Buildings</Text>
-          </View>
-          <View style={styles.infoItem}>
-            <IconSymbol name="location.fill" size={16} color="#FFA500" />
-            <Text style={styles.infoText}>Route Display</Text>
-          </View>
-          <View style={styles.infoItem}>
-            <IconSymbol name="map" size={16} color="#FFA500" />
-            <Text style={styles.infoText}>Pan & Zoom</Text>
-          </View>
-        </View>
-        
-        <Text style={styles.instructionsText}>
-          Drag to pan, pinch to zoom, use 3D View button to tilt the map. Toggle Sun Glare to see demo sunglare visualization.
-        </Text>
-      </View>
     </SafeAreaView>
   );
 }
