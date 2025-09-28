@@ -1,3 +1,6 @@
+## Introduction
+Drive safely with GlareGuard; the smart navigation assistant that alerts you to when and where sun glare could impair your vision, keeping you prepared and in control.
+
 ## Inspiration
 - Driving into the sun isn’t just annoying; it’s dangerous. Sun glare is the **second leading environmental cause of crashes**.  
 - Our goal was to build an **end-to-end geospatial pipeline** that predicts glare exposure along a planned route by fusing solar-geometry models, terrain DEMs, and urban obstruction data, all delivered in an interactive mobile UI.
