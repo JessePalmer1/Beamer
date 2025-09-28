@@ -25,7 +25,7 @@ const getBooleanEnvVar = (key: string, defaultValue: boolean = false): boolean =
 export const config = {
   // API Server URL - our secure backend that proxies Google API calls
   // Change this if your server is running on a different host/port
-  apiUrl: getEnvVar('EXPO_PUBLIC_API_URL', 'http://172.16.14.166:8000'),
+  apiUrl: getEnvVar('EXPO_PUBLIC_API_URL', 'http://34.73.230.185:8000'),
 
   // Demo mode - set to true to use mock location suggestions
   // when API server is not available
